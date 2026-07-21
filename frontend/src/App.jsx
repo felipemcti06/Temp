@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
+import { apiUrl } from './api'
 import './App.css'
 
 export default function App() {
@@ -9,7 +10,7 @@ export default function App() {
   const [mode, setMode] = useState('fallback')
 
   useEffect(() => {
-    fetch('/api/health')
+    fetch(apiUrl('/api/health'))
       .then((r) => r.json())
       .then((data) => setMode(data.mode))
       .catch(() => {})
@@ -26,7 +27,7 @@ export default function App() {
       setLoading(true)
 
       try {
-        const res = await fetch('/api/chat', {
+        const res = await fetch(apiUrl('/api/chat'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: text, session_id: sessionId }),

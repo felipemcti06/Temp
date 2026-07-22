@@ -66,6 +66,17 @@ def _has_openai_key() -> bool:
     return has_openai_key()
 
 
+def _needs_report(messages: list[dict]) -> bool:
+    last_user = next(
+        (m["content"] for m in reversed(messages) if m["role"] == "user"),
+        "",
+    )
+    text = last_user.lower()
+    return bool(
+        re.search(r"\b(html|relatório|relatorio|dashboard|executivo|gráfico|grafico)\b", text)
+    )
+
+
 def _needs_tm1_tools(messages: list[dict]) -> bool:
     last_user = next(
         (m["content"] for m in reversed(messages) if m["role"] == "user"),
@@ -102,13 +113,15 @@ def generate_response(
         return _fallback_response(last_user_msg), "fallback"
 
     mcp_client = TM1MCPClient.from_env() if tm1_is_configured() else None
-    force_tools = bool(mcp_client and _needs_tm1_tools(messages))
+    wants_report = _needs_report(messages)
+    force_tools = bool(mcp_client and (_needs_tm1_tools(messages) or wants_report))
 
     return generate_with_model(
         messages,
         option,
         mcp_client=mcp_client,
         force_tools=force_tools,
+        needs_report=wants_report,
         username=username,
     )
 

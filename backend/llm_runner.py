@@ -23,10 +23,12 @@ Quando o usuário pedir dados, valores, totais ou informações de um ano (ex: 2
 3. Só use tm1_execute_mdx se precisar de MDX customizado
 
 Quando o usuário pedir relatório, resumo executivo, dashboard ou HTML:
-1. PRIMEIRO consulte o TM1 e obtenha os dados reais
+1. PRIMEIRO consulte o TM1 e obtenha os dados reais (use tm1_execute_mdx para séries mensais)
 2. Analise tendências, variações e destaques
-3. Chame create_html_report com title e html (tabelas, KPIs, resumo executivo)
-4. Na resposta final, informe o link retornado (ex: /relatorio/uuid) e um resumo curto
+3. OBRIGATÓRIO: chame create_html_report com title e html — NUNCA diga "vou montar" sem chamar a ferramenta
+4. Só depois de create_html_report retornar a URL, envie a resposta final com o link /relatorio/{id}
+
+PROIBIDO encerrar com mensagens como "agora vou montar o relatório" sem ter chamado create_html_report.
 
 Exemplo de HTML no relatório:
 <h1>Título</h1>
@@ -53,15 +55,42 @@ class ToolLoopContext:
         mcp_client: TM1MCPClient | None,
         force_tools: bool,
         username: str | None = None,
+        needs_report: bool = False,
     ):
         self.messages = messages
         self.mcp_client = mcp_client
         self.force_tools = force_tools
         self.username = username
+        self.needs_report = needs_report
+        self.report_created = False
+        self.report_url: str | None = None
         self.use_tm1 = mcp_client is not None
         self.tools: list[dict[str, Any]] = list(REPORT_TOOL_DEFINITIONS)
         if self.use_tm1:
             self.tools.extend(OPENAI_TOOL_DEFINITIONS)
+
+    def should_force_tools(self) -> bool:
+        if self.needs_report and not self.report_created:
+            return True
+        return self.force_tools
+
+    def note_tool_results(self, tool_calls: list[tuple[str, str, dict]], results: list[tuple[str, str]]) -> None:
+        for (_, fn_name, _), (_, result) in zip(tool_calls, results):
+            if fn_name != "create_html_report":
+                continue
+            try:
+                payload = json.loads(result)
+            except json.JSONDecodeError:
+                continue
+            if payload.get("url"):
+                self.report_created = True
+                self.report_url = payload["url"]
+
+    def report_pending_nudge(self) -> str:
+        return (
+            "Você ainda NÃO publicou o relatório. Chame create_html_report AGORA com o HTML "
+            "completo (título, resumo executivo, tabela de dados). Não responda apenas com texto."
+        )
 
 
 def _to_anthropic_tools(tools: list[dict]) -> list[dict]:
@@ -107,6 +136,13 @@ def _run_tool_calls(
     return results
 
 
+def _finalize_response(content: str, ctx: ToolLoopContext) -> str:
+    text = content.strip() or "Não consegui gerar uma resposta."
+    if ctx.report_url and ctx.report_url not in text:
+        text = f"{text}\n\nRelatório publicado: {ctx.report_url}"
+    return text
+
+
 def _openai_tool_loop(
     client: OpenAI,
     model: str,
@@ -114,18 +150,18 @@ def _openai_tool_loop(
     mode_prefix: str,
 ) -> tuple[str, str]:
     api_messages = [{"role": "system", "content": SYSTEM_PROMPT}, *ctx.messages]
-    temperature = 0.2 if ctx.force_tools else 0.7
+    temperature = 0.2 if ctx.should_force_tools() else 0.7
 
     for _ in range(MAX_TM1_ITERATIONS):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": api_messages,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
             "temperature": temperature,
         }
         if ctx.tools:
             kwargs["tools"] = ctx.tools
-            if ctx.force_tools:
+            if ctx.should_force_tools():
                 kwargs["tool_choice"] = "required"
 
         completion = client.chat.completions.create(**kwargs)
@@ -133,6 +169,10 @@ def _openai_tool_loop(
         message = choice.message
 
         if choice.finish_reason == "tool_calls" and message.tool_calls:
+            tool_batch = [
+                (tc.id, tc.function.name, json.loads(tc.function.arguments or "{}"))
+                for tc in message.tool_calls
+            ]
             api_messages.append(
                 {
                     "role": "assistant",
@@ -150,26 +190,32 @@ def _openai_tool_loop(
                     ],
                 }
             )
-            for call_id, result in _run_tool_calls(
-                ctx.mcp_client,
-                [
-                    (tc.id, tc.function.name, json.loads(tc.function.arguments or "{}"))
-                    for tc in message.tool_calls
-                ],
-                username=ctx.username,
-            ):
+            tool_results = _run_tool_calls(ctx.mcp_client, tool_batch, username=ctx.username)
+            ctx.note_tool_results(tool_batch, tool_results)
+            for call_id, result in tool_results:
                 api_messages.append(
                     {"role": "tool", "tool_call_id": call_id, "content": result}
                 )
-            ctx.force_tools = False
+            if not ctx.needs_report or ctx.report_created:
+                ctx.force_tools = False
             continue
 
-        content = message.content or "Não consegui gerar uma resposta."
+        content = message.content or ""
+        if ctx.needs_report and not ctx.report_created:
+            api_messages.append({"role": "assistant", "content": content or "..."})
+            api_messages.append({"role": "user", "content": ctx.report_pending_nudge()})
+            continue
+
         suffix = "+tm1" if ctx.use_tm1 else ""
-        return content, f"{mode_prefix}{suffix}"
+        return _finalize_response(content, ctx), f"{mode_prefix}{suffix}"
 
     return (
-        "A consulta exigiu muitas etapas. Tente uma pergunta mais específica.",
+        "Não foi possível concluir a solicitação. "
+        + (
+            "O relatório HTML não foi publicado — tente novamente."
+            if ctx.needs_report and not ctx.report_created
+            else "Tente uma pergunta mais específica."
+        ),
         f"{mode_prefix}+tm1" if ctx.use_tm1 else mode_prefix,
     )
 
@@ -190,13 +236,13 @@ def _anthropic_tool_loop(
     for _ in range(MAX_TM1_ITERATIONS):
         kwargs: dict[str, Any] = {
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
             "system": SYSTEM_PROMPT,
             "messages": anthropic_messages,
         }
         if tools:
             kwargs["tools"] = tools
-            if ctx.force_tools:
+            if ctx.should_force_tools():
                 kwargs["tool_choice"] = {"type": "any"}
 
         response = client.messages.create(**kwargs)
@@ -204,31 +250,48 @@ def _anthropic_tool_loop(
         if response.stop_reason == "tool_use":
             anthropic_messages.append({"role": "assistant", "content": response.content})
             tool_calls = [
-                (block.id, block.name, block.input)
+                (block.id, block.name, block.input if isinstance(block.input, dict) else {})
                 for block in response.content
                 if block.type == "tool_use"
             ]
-            tool_results = [
+            tool_results = _run_tool_calls(
+                ctx.mcp_client, tool_calls, username=ctx.username
+            )
+            ctx.note_tool_results(tool_calls, tool_results)
+            anthropic_messages.append(
                 {
-                    "type": "tool_result",
-                    "tool_use_id": call_id,
-                    "content": result,
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": call_id,
+                            "content": result,
+                        }
+                        for call_id, result in tool_results
+                    ],
                 }
-                for call_id, result in _run_tool_calls(
-                    ctx.mcp_client, tool_calls, username=ctx.username
-                )
-            ]
-            anthropic_messages.append({"role": "user", "content": tool_results})
-            ctx.force_tools = False
+            )
+            if not ctx.needs_report or ctx.report_created:
+                ctx.force_tools = False
             continue
 
         parts = [block.text for block in response.content if block.type == "text"]
-        content = "".join(parts) or "Não consegui gerar uma resposta."
+        content = "".join(parts)
+        if ctx.needs_report and not ctx.report_created:
+            anthropic_messages.append({"role": "assistant", "content": response.content})
+            anthropic_messages.append({"role": "user", "content": ctx.report_pending_nudge()})
+            continue
+
         suffix = "+tm1" if ctx.use_tm1 else ""
-        return content, f"{mode_prefix}{suffix}"
+        return _finalize_response(content, ctx), f"{mode_prefix}{suffix}"
 
     return (
-        "A consulta exigiu muitas etapas. Tente uma pergunta mais específica.",
+        "Não foi possível concluir a solicitação. "
+        + (
+            "O relatório HTML não foi publicado — tente novamente."
+            if ctx.needs_report and not ctx.report_created
+            else "Tente uma pergunta mais específica."
+        ),
         f"{mode_prefix}+tm1" if ctx.use_tm1 else mode_prefix,
     )
 
@@ -243,9 +306,12 @@ def generate_with_model(
     *,
     mcp_client: TM1MCPClient | None,
     force_tools: bool,
+    needs_report: bool = False,
     username: str | None = None,
 ) -> tuple[str, str]:
-    ctx = ToolLoopContext(messages, mcp_client, force_tools, username=username)
+    ctx = ToolLoopContext(
+        messages, mcp_client, force_tools, username=username, needs_report=needs_report
+    )
     use_tools = _should_use_tools(mcp_client, force_tools)
 
     if option.provider == "openai":

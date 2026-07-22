@@ -12,12 +12,12 @@ from tm1_mcp import TM1MCPClient
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DATA_AGENT_MODEL = "openai/gpt-4o-mini"
+DEFAULT_DATA_AGENT_MODEL = "anthropic/claude-sonnet-4-6"
 FALLBACK_DATA_AGENT_MODELS = [
+    "anthropic/claude-sonnet-4-6",
     "openai/gpt-4o-mini",
     "anthropic/claude-haiku-4-5",
     "openai/gpt-4o",
-    "anthropic/claude-sonnet-4-6",
 ]
 
 

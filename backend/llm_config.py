@@ -82,7 +82,7 @@ def list_available_models() -> list[dict]:
 
 
 def resolve_default_model_id() -> str | None:
-    default = os.getenv("DEFAULT_MODEL_ID", "").strip()
+    default = _normalize_model_id(os.getenv("DEFAULT_MODEL_ID", "").strip())
     if default and is_model_available(default):
         return default
     if has_openai_key():

@@ -32,9 +32,15 @@ export default function App() {
         setMode(health.mode)
         setModels(modelsData.models || [])
         const saved = getSavedModelId()
+        const legacyMap = {
+          'anthropic/claude-sonnet-4-20250514': 'anthropic/claude-sonnet-4-6',
+          'anthropic/claude-3-5-haiku-20241022': 'anthropic/claude-haiku-4-5',
+        }
+        const normalizedSaved = legacyMap[saved] || saved
         const available = (modelsData.models || []).filter((m) => m.available)
-        const savedOk = available.some((m) => m.id === saved)
-        const initial = savedOk ? saved : modelsData.default || available[0]?.id || ''
+        const savedOk = available.some((m) => m.id === normalizedSaved)
+        const initial = savedOk ? normalizedSaved : modelsData.default || available[0]?.id || ''
+        if (normalizedSaved !== saved && normalizedSaved) saveModelId(normalizedSaved)
         setModelId(initial)
       })
       .catch(() => {})

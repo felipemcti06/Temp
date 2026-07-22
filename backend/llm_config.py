@@ -18,20 +18,31 @@ class ModelOption:
         return cls(id=model_id, provider=provider, model=model, label=label)
 
 
+LEGACY_MODEL_MAP: dict[str, str] = {
+    "anthropic/claude-sonnet-4-20250514": "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-3-5-haiku-20241022": "anthropic/claude-haiku-4-5",
+}
+
 AVAILABLE_MODELS: list[ModelOption] = [
     ModelOption("openai/gpt-4o-mini", "openai", "gpt-4o-mini", "GPT-4o Mini"),
     ModelOption("openai/gpt-4o", "openai", "gpt-4o", "GPT-4o"),
     ModelOption(
-        "anthropic/claude-sonnet-4-20250514",
+        "anthropic/claude-sonnet-5",
         "anthropic",
-        "claude-sonnet-4-20250514",
-        "Claude Sonnet 4",
+        "claude-sonnet-5",
+        "Claude Sonnet 5",
     ),
     ModelOption(
-        "anthropic/claude-3-5-haiku-20241022",
+        "anthropic/claude-sonnet-4-6",
         "anthropic",
-        "claude-3-5-haiku-20241022",
-        "Claude 3.5 Haiku",
+        "claude-sonnet-4-6",
+        "Claude Sonnet 4.6",
+    ),
+    ModelOption(
+        "anthropic/claude-haiku-4-5",
+        "anthropic",
+        "claude-haiku-4-5",
+        "Claude Haiku 4.5",
     ),
 ]
 
@@ -77,12 +88,16 @@ def resolve_default_model_id() -> str | None:
     if has_openai_key():
         return "openai/gpt-4o-mini"
     if has_anthropic_key():
-        return "anthropic/claude-sonnet-4-20250514"
+        return "anthropic/claude-sonnet-4-6"
     return None
 
 
+def _normalize_model_id(model_id: str) -> str:
+    return LEGACY_MODEL_MAP.get(model_id, model_id)
+
+
 def resolve_model_id(requested: str | None) -> ModelOption | None:
-    model_id = requested or resolve_default_model_id()
+    model_id = _normalize_model_id(requested or resolve_default_model_id() or "")
     if not model_id:
         return None
     if not is_model_available(model_id):

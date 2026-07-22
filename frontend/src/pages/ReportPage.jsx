@@ -66,7 +66,7 @@ export default function ReportPage() {
           className="report-page__frame"
           title={report.title}
           srcDoc={report.html}
-          sandbox="allow-same-origin"
+          sandbox="allow-scripts allow-same-origin"
         />
       )}
     </div>

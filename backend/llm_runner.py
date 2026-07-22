@@ -35,6 +35,11 @@ Exemplo de HTML no relatório:
 <p>Resumo executivo...</p>
 <table><thead>...</thead><tbody>...</tbody></table>
 
+Para gráficos interativos, use Chart.js via CDN com script inline e canvas com altura definida:
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<canvas id="chart" style="max-width:800px;height:400px"></canvas>
+<script>/* new Chart(document.getElementById('chart'), {...}) */</script>
+
 Nunca invente nomes de cubos, dimensões ou valores numéricos.
 
 Capacidades TM1:

@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id
+from tm1_mdx_builder import query_cube_data
 
 MAX_TOOL_RESULT_CHARS = 12_000
 DEFAULT_MDX_TOP = 50
@@ -108,10 +109,35 @@ OPENAI_TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "tm1_get_cube_data",
+            "description": (
+                "Consulta dados de um cubo TM1 de forma automática (monta o MDX correto). "
+                "PREFERIR esta tool em vez de tm1_execute_mdx quando o usuário pedir valores, "
+                "totais ou dados de um ano/mês."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cube_name": {"type": "string", "description": "Nome do cubo, ex: RTB.100.DRE_Produto"},
+                    "year": {"type": "string", "description": "Ano, ex: 2025"},
+                    "month": {"type": "string", "description": "Mês (opcional), ex: Jan ou 01"},
+                    "measure": {
+                        "type": "string",
+                        "description": "Medida (opcional). Padrão: Valor ou primeira medida numérica.",
+                    },
+                    "top": {"type": "integer", "description": "Máximo de células. Padrão: 50."},
+                },
+                "required": ["cube_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "tm1_execute_mdx",
             "description": (
-                "Executa uma consulta MDX SELECT no TM1 e retorna células. "
-                "Use para consultar valores de cubos. Limite padrão de 50 células."
+                "Executa MDX manualmente. Use apenas se tm1_get_cube_data não atender. "
+                "Sintaxe TM1: SELECT {[Dim].[Elem]} ON 0, {[Dim2].[Elem2]} ON 1 FROM [Cubo]"
             ),
             "parameters": {
                 "type": "object",
@@ -282,7 +308,23 @@ def _format_result(result: Any) -> str:
     return text
 
 
+
 def execute_tm1_tool(client: TM1MCPClient, tool_name: str, arguments: dict[str, Any]) -> str:
+    if tool_name == "tm1_get_cube_data":
+        connection_id = get_default_connection_id()
+        if not connection_id:
+            raise TM1MCPError("TM1_CONNECTION_ID não configurado")
+        result = query_cube_data(
+            client,
+            connection_id,
+            arguments["cube_name"],
+            year=arguments.get("year"),
+            month=arguments.get("month"),
+            measure=arguments.get("measure"),
+            top=arguments.get("top", DEFAULT_MDX_TOP),
+        )
+        return _format_result(result)
+
     mcp_tool = TOOL_TO_MCP.get(tool_name)
     if not mcp_tool:
         raise TM1MCPError(f"Tool desconhecida: {tool_name}")

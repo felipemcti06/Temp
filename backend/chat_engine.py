@@ -99,6 +99,9 @@ def _build_tools() -> list[dict] | None:
     return OPENAI_TOOL_DEFINITIONS
 
 
+MAX_TM1_ITERATIONS = int(os.getenv("TM1_MAX_ITERATIONS", "20"))
+
+
 def _needs_tm1_tools(messages: list[dict]) -> bool:
     last_user = next(
         (m["content"] for m in reversed(messages) if m["role"] == "user"),
@@ -125,7 +128,7 @@ def _run_with_tools(
     force_tools = _needs_tm1_tools(messages)
     temperature = 0.2 if force_tools else 0.7
 
-    for iteration in range(10):
+    for iteration in range(MAX_TM1_ITERATIONS):
         kwargs: dict = {
             "model": model,
             "messages": api_messages,
@@ -181,7 +184,35 @@ def _run_with_tools(
         mode = "ai+tm1" if tools else "ai"
         return content, mode
 
-    return "Limite de iterações atingido ao consultar o TM1.", "ai+tm1"
+    # Limite atingido — tenta resumir o que já foi consultado
+    try:
+        summary = client.chat.completions.create(
+            model=model,
+            messages=[
+                *api_messages,
+                {
+                    "role": "user",
+                    "content": (
+                        "Com base nos dados TM1 já consultados acima, responda ao usuário "
+                        "de forma clara. Se a consulta ficou incompleta, explique o que foi "
+                        "possível obter."
+                    ),
+                },
+            ],
+            max_tokens=1024,
+            temperature=0.3,
+        )
+        content = summary.choices[0].message.content
+        if content:
+            return content, "ai+tm1"
+    except Exception:
+        pass
+
+    return (
+        "A consulta ao TM1 exigiu muitas etapas. Tente uma pergunta mais específica, "
+        "informando o nome do cubo (ex: RTB.100.DRE_Produto) e o ano desejado.",
+        "ai+tm1",
+    )
 
 
 def generate_response(messages: list[dict]) -> tuple[str, str]:

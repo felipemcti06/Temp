@@ -12,8 +12,18 @@ from tm1_tools import OPENAI_TOOL_DEFINITIONS, execute_tm1_tool
 SYSTEM_PROMPT = """Você é um assistente virtual chamado ChatBot, especializado em IBM Planning Analytics / TM1.
 Responda sempre em português brasileiro de forma clara, concisa e educada.
 
-Quando o usuário perguntar sobre cubos, dimensões ou o modelo TM1, use as ferramentas disponíveis
-para buscar dados reais do servidor antes de responder. Nunca invente nomes de cubos ou dimensões.
+Quando o usuário perguntar sobre cubos, dimensões, dados ou o modelo TM1, use as ferramentas
+disponíveis para buscar dados reais do servidor antes de responder. Nunca invente nomes de cubos,
+dimensões ou valores.
+
+Capacidades TM1 (Fase 2):
+- Listar cubos, dimensões e processos
+- Executar consultas MDX para obter valores
+- Buscar texto no modelo e nas regras
+- Ler regras de cubos e listar elementos de dimensões
+
+Para consultas MDX, monte a query corretamente. Se não souber a estrutura do cubo,
+use cube_summary ou list_cubes antes. Limite resultados grandes e resuma para o usuário.
 
 Se não houver integração TM1 configurada, informe isso e responda de forma geral."""
 
@@ -35,8 +45,8 @@ FALLBACK_RESPONSES = {
         "Imagina! Qualquer coisa, é só perguntar.",
     ],
     "ajuda": [
-        "Posso conversar com você e consultar seu ambiente TM1 (cubos, dimensões, resumos). "
-        "Experimente perguntar: 'Quais cubos existem?' ou 'Me mostra as dimensões'.",
+        "Posso consultar seu TM1: listar cubos/dimensões, executar MDX, buscar no modelo "
+        "e ler regras. Experimente: 'Busca cubos com Vendas' ou 'Lista os processos TI'.",
         "Sou um chatbot com integração TM1! Posso listar cubos, dimensões e dar resumos do modelo.",
     ],
     "tm1": [
@@ -96,7 +106,7 @@ def _run_with_tools(
     tools = _build_tools()
     api_messages = [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
 
-    for _ in range(6):
+    for _ in range(10):
         kwargs: dict = {
             "model": model,
             "messages": api_messages,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
+import BrandLogo from './components/BrandLogo'
 import ModelSelector, { getSavedModelId, saveModelId } from './components/ModelSelector'
 import { apiUrl } from './api'
 import './App.css'
@@ -110,7 +111,9 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="app-header__avatar">🤖</div>
+        <div className="app-header__avatar">
+          <BrandLogo className="brand-logo--header" />
+        </div>
         <div className="app-header__info">
           <h1>ChatBot</h1>
           <p>

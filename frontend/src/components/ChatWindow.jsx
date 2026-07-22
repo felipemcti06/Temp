@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
 import ChatInput from './ChatInput'
+import BrandLogo from './BrandLogo'
 
 const SUGGESTIONS = [
   'Olá! Como você funciona?',
@@ -20,7 +21,9 @@ export default function ChatWindow({ messages, onSend, loading }) {
       <div className="messages">
         {messages.length === 0 && (
           <div className="welcome">
-            <div className="welcome__icon">💬</div>
+            <div className="welcome__icon">
+              <BrandLogo className="brand-logo--welcome" />
+            </div>
             <h2>Bem-vindo ao ChatBot!</h2>
             <p>
               Sou seu assistente virtual. Pode me perguntar qualquer coisa ou
@@ -47,7 +50,9 @@ export default function ChatWindow({ messages, onSend, loading }) {
 
         {loading && (
           <div className="message message--bot">
-            <div className="message__avatar">🤖</div>
+            <div className="message__avatar">
+              <BrandLogo className="brand-logo--message" />
+            </div>
             <div className="typing">
               <span />
               <span />

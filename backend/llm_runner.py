@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any
 
@@ -150,7 +151,6 @@ def _anthropic_tool_loop(
         for m in ctx.messages
         if m["role"] in ("user", "assistant")
     ]
-    temperature = 0.2 if ctx.force_tools else 0.7
     tools = _to_anthropic_tools(ctx.tools) if ctx.tools else None
 
     for _ in range(MAX_TM1_ITERATIONS):
@@ -159,7 +159,6 @@ def _anthropic_tool_loop(
             "max_tokens": 1024,
             "system": SYSTEM_PROMPT,
             "messages": anthropic_messages,
-            "temperature": temperature,
         }
         if tools:
             kwargs["tools"] = tools

@@ -1,7 +1,48 @@
+"""Montagem de MDX e consultas estruturadas ao TM1."""
+
+from __future__ import annotations
+
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 from tm1_mcp import TM1MCPClient, TM1MCPError
+
+MONTH_LABELS = {
+    "01": "Jan",
+    "02": "Fev",
+    "03": "Mar",
+    "04": "Abr",
+    "05": "Mai",
+    "06": "Jun",
+    "07": "Jul",
+    "08": "Ago",
+    "09": "Set",
+    "10": "Out",
+    "11": "Nov",
+    "12": "Dez",
+}
+
+_CATALOG_PATH = Path(__file__).with_name("metrics_catalog.json")
+
+
+def _load_catalog() -> dict[str, Any]:
+    if not _CATALOG_PATH.exists():
+        return {}
+    return json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+
+
+def resolve_metric_catalog(metric: str | None) -> dict[str, Any] | None:
+    if not metric:
+        return None
+    catalog = _load_catalog()
+    key = metric.strip().lower()
+    for name, cfg in catalog.items():
+        aliases = [name.lower(), *[a.lower() for a in cfg.get("aliases", [])]]
+        if key in aliases:
+            return {"name": name, **cfg}
+    return None
 
 
 def _dim_names(summary: dict[str, Any]) -> list[str]:
@@ -13,7 +54,6 @@ def _find_measure_dim(dim_names: list[str], cube_name: str) -> str | None:
     for name in dim_names:
         if ".M." in name:
             return name
-    # fallback: cubo com sufixo .M.Cubo
     prefix = cube_name.split(".")[-1] if "." in cube_name else cube_name
     for name in dim_names:
         if name.endswith(f".M.{prefix}") or name.endswith(".M." + cube_name):
@@ -29,26 +69,68 @@ def _find_dim(dim_names: list[str], *hints: str) -> str | None:
     return None
 
 
-def _first_measure_element(client: TM1MCPClient, connection_id: str, measure_dim: str) -> str:
+def _list_element_names(client: TM1MCPClient, connection_id: str, dimension: str, top: int = 200) -> list[str]:
     elements = client.call_tool(
         "list_elements",
-        {"connection_id": connection_id, "dimension_name": measure_dim, "top": 20},
+        {"connection_id": connection_id, "dimension_name": dimension, "top": top},
     )
-
     if isinstance(elements, list):
         items = elements
     elif isinstance(elements, dict):
         items = [elements]
     else:
         items = []
+    return [i.get("Name", "") for i in items if isinstance(i, dict) and i.get("Name")]
 
-    for item in items:
-        if isinstance(item, dict) and item.get("Type") == "Numeric":
-            return item.get("Name", "Valor")
 
-    if items and isinstance(items[0], dict):
-        return items[0].get("Name", "Valor")
-    return "Valor"
+def _first_measure_element(client: TM1MCPClient, connection_id: str, measure_dim: str) -> str:
+    names = _list_element_names(client, connection_id, measure_dim, top=20)
+    return names[0] if names else "Valor"
+
+
+def _find_total_element(names: list[str], *hints: str) -> str | None:
+    lowered = [(n, n.lower()) for n in names]
+    for hint in hints:
+        h = hint.lower()
+        for original, low in lowered:
+            if h in low and ("total" in low or low.startswith("total")):
+                return original
+    for original, low in lowered:
+        if low.startswith("total") or low.endswith("_total") or "total_" in low:
+            return original
+    return names[0] if names else None
+
+
+def _resolve_account_element(
+    client: TM1MCPClient,
+    connection_id: str,
+    account_dim: str,
+    account: str,
+) -> str:
+    names = _list_element_names(client, connection_id, account_dim, top=300)
+    if not names:
+        return account
+
+    target = account.strip().lower()
+    for name in names:
+        if name.lower() == target:
+            return name
+
+    # match parcial: "EBITDA" → "EBITDA Gerencial"
+    candidates = [n for n in names if target in n.lower() or n.lower() in target]
+    if len(candidates) == 1:
+        return candidates[0]
+    if candidates:
+        # prefer exact alias containing the word as whole token
+        for n in candidates:
+            if re.search(rf"\b{re.escape(target)}\b", n.lower()):
+                return n
+        return candidates[0]
+
+    raise TM1MCPError(
+        f"Elemento '{account}' não encontrado em {account_dim}. "
+        f"Exemplos: {', '.join(names[:12])}"
+    )
 
 
 def build_cube_data_mdx(
@@ -143,4 +225,148 @@ def query_cube_data(
     return {
         "mdx": mdx,
         "resultado": simplify_mdx_result(raw),
+    }
+
+
+def query_time_series(
+    client: TM1MCPClient,
+    connection_id: str,
+    *,
+    cube_name: str | None = None,
+    metric: str | None = None,
+    year: str = "2025",
+    version: str | None = None,
+    account: str | None = None,
+    measure: str | None = None,
+) -> dict[str, Any]:
+    """
+    Consulta série mensal (01-12) de uma métrica/conta em um cubo DRE.
+
+    Resolve automaticamente dimensões (Ano, Mes, Versao, Conta, Filial, Produto, Medida)
+    e aliases do metrics_catalog.json (ex: EBITDA → EBITDA Gerencial).
+    """
+    catalog = resolve_metric_catalog(metric)
+    if catalog:
+        cube_name = cube_name or catalog.get("cube")
+        account = account or catalog.get("account")
+        version = version or catalog.get("version")
+        measure = measure or catalog.get("measure")
+        metric_name = catalog.get("name") or metric
+    else:
+        metric_name = metric or account or "métrica"
+
+    if not cube_name:
+        raise TM1MCPError("Informe cube_name ou uma métrica do catálogo (ex: EBITDA)")
+    if not account and metric:
+        account = metric
+    if not account:
+        raise TM1MCPError("Informe account ou metric (ex: EBITDA / EBITDA Gerencial)")
+
+    summary = client.call_tool(
+        "cube_summary",
+        {"connection_id": connection_id, "cube_name": cube_name},
+    )
+    if not isinstance(summary, dict):
+        raise TM1MCPError(f"Não foi possível obter estrutura do cubo {cube_name}")
+
+    names = _dim_names(summary)
+    measure_dim = _find_measure_dim(names, cube_name)
+    ano_dim = _find_dim(names, "Ano", "Year")
+    mes_dim = _find_dim(names, "Mes", "Month")
+    versao_dim = _find_dim(names, "Versao", "Version", "Cenário", "Cenario")
+    conta_dim = _find_dim(names, "Conta", "Account", "Gerencial")
+    filial_dim = _find_dim(names, "Filial", "Empresa", "Entity", "Org")
+    produto_dim = _find_dim(names, "Produto", "Product")
+
+    if not measure_dim or not ano_dim or not mes_dim:
+        raise TM1MCPError(
+            f"Cubo {cube_name} precisa de dimensões de Medida (.M.), Ano e Mês. "
+            f"Encontradas: {names}"
+        )
+    if not conta_dim:
+        raise TM1MCPError(
+            f"Cubo {cube_name} não tem dimensão de Conta/Gerencial. Dimensões: {names}"
+        )
+
+    measure_elem = measure or _first_measure_element(client, connection_id, measure_dim)
+    account_elem = _resolve_account_element(client, connection_id, conta_dim, account)
+    version_elem = version or "REAL"
+
+    where_parts = [
+        f"[{conta_dim}].[{account_elem}]",
+        f"[{ano_dim}].[{year}]",
+    ]
+    if versao_dim:
+        where_parts.append(f"[{versao_dim}].[{version_elem}]")
+
+    if catalog:
+        if filial_dim and catalog.get("filial"):
+            where_parts.append(f"[{filial_dim}].[{catalog['filial']}]")
+        if produto_dim and catalog.get("produto"):
+            where_parts.append(f"[{produto_dim}].[{catalog['produto']}]")
+    else:
+        if filial_dim:
+            filial_names = _list_element_names(client, connection_id, filial_dim, top=50)
+            total = _find_total_element(filial_names, "filial", "empresa")
+            if total:
+                where_parts.append(f"[{filial_dim}].[{total}]")
+        if produto_dim:
+            produto_names = _list_element_names(client, connection_id, produto_dim, top=50)
+            total = _find_total_element(produto_names, "produto", "product")
+            if total:
+                where_parts.append(f"[{produto_dim}].[{total}]")
+
+    month_set = ",".join(f"[{mes_dim}].[{m}]" for m in MONTH_LABELS)
+    mdx = (
+        f"SELECT {{[{measure_dim}].[{measure_elem}]}} ON 0, "
+        f"{{{month_set}}} ON 1 "
+        f"FROM [{cube_name}] "
+        f"WHERE ({','.join(where_parts)})"
+    )
+
+    raw = client.call_tool(
+        "execute_mdx",
+        {"connection_id": connection_id, "mdx": mdx, "top": 20, "skip": 0},
+    )
+    if not isinstance(raw, dict):
+        raise TM1MCPError(f"Resposta MDX inválida: {raw}")
+
+    cells = raw.get("cells") or []
+    series = []
+    for idx, month_code in enumerate(MONTH_LABELS):
+        cell = cells[idx] if idx < len(cells) else {}
+        value = cell.get("Value") if isinstance(cell, dict) else None
+        series.append(
+            {
+                "label": MONTH_LABELS[month_code],
+                "month": month_code,
+                "value": value,
+                "formatted": cell.get("FormattedValue") if isinstance(cell, dict) else None,
+            }
+        )
+
+    numeric = [s["value"] for s in series if isinstance(s["value"], (int, float))]
+    summary_text = ""
+    if numeric:
+        first, last = numeric[0], numeric[-1]
+        if first:
+            pct = ((last - first) / abs(first)) * 100
+            summary_text = (
+                f"{metric_name} em {year}: início {series[0]['formatted']}, "
+                f"fim {series[-1]['formatted']} ({pct:+.1f}% no ano)."
+            )
+        else:
+            summary_text = f"{metric_name} em {year}: série mensal obtida."
+
+    return {
+        "metric": metric_name,
+        "account": account_elem,
+        "cube": cube_name,
+        "period": year,
+        "version": version_elem,
+        "granularity": "monthly",
+        "series": series,
+        "summary": summary_text,
+        "mdx": mdx,
+        "sources": [{"tool": "tm1_get_time_series", "mdx": mdx}],
     }

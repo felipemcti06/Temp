@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id
-from tm1_mdx_builder import query_cube_data
+from tm1_mdx_builder import query_cube_data, query_time_series
 
 MAX_TOOL_RESULT_CHARS = 12_000
 DEFAULT_MDX_TOP = 50
@@ -112,8 +112,7 @@ OPENAI_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "tm1_get_cube_data",
             "description": (
                 "Consulta dados de um cubo TM1 de forma automática (monta o MDX correto). "
-                "PREFERIR esta tool em vez de tm1_execute_mdx quando o usuário pedir valores, "
-                "totais ou dados de um ano/mês."
+                "Use para totais pontuais. Para evolução mensal, PREFIRA tm1_get_time_series."
             ),
             "parameters": {
                 "type": "object",
@@ -134,9 +133,48 @@ OPENAI_TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "tm1_get_time_series",
+            "description": (
+                "Consulta série MENSAL (Jan-Dez) de uma métrica financeira no TM1. "
+                "OBRIGATÓRIO para evolução mensal, EBITDA, DRE ao longo do ano. "
+                "Resolve aliases automaticamente (ex: EBITDA → EBITDA Gerencial). "
+                "Retorna JSON com series[{label, month, value, formatted}]."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "metric": {
+                        "type": "string",
+                        "description": "Métrica, ex: EBITDA, Receita Operacional, EBITDA %",
+                    },
+                    "cube_name": {
+                        "type": "string",
+                        "description": "Cubo (opcional se a métrica estiver no catálogo). Ex: RTB.100.DRE_Produto",
+                    },
+                    "year": {"type": "string", "description": "Ano, ex: 2025"},
+                    "version": {
+                        "type": "string",
+                        "description": "Versão: REAL (realizado), ORCADO. Padrão: REAL",
+                    },
+                    "account": {
+                        "type": "string",
+                        "description": "Elemento exato da conta (opcional). Ex: EBITDA Gerencial",
+                    },
+                    "measure": {
+                        "type": "string",
+                        "description": "Medida. Padrão: Valor",
+                    },
+                },
+                "required": ["year"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "tm1_execute_mdx",
             "description": (
-                "Executa MDX manualmente. Use apenas se tm1_get_cube_data não atender. "
+                "Executa MDX manualmente. Use apenas se tm1_get_time_series / tm1_get_cube_data não atender. "
                 "Sintaxe TM1: SELECT {[Dim].[Elem]} ON 0, {[Dim2].[Elem2]} ON 1 FROM [Cubo]"
             ),
             "parameters": {
@@ -310,10 +348,11 @@ def _format_result(result: Any) -> str:
 
 
 def execute_tm1_tool(client: TM1MCPClient, tool_name: str, arguments: dict[str, Any]) -> str:
+    connection_id = get_default_connection_id()
+    if not connection_id and tool_name != "tm1_list_connections":
+        raise TM1MCPError("TM1_CONNECTION_ID não configurado")
+
     if tool_name == "tm1_get_cube_data":
-        connection_id = get_default_connection_id()
-        if not connection_id:
-            raise TM1MCPError("TM1_CONNECTION_ID não configurado")
         result = query_cube_data(
             client,
             connection_id,
@@ -322,6 +361,19 @@ def execute_tm1_tool(client: TM1MCPClient, tool_name: str, arguments: dict[str, 
             month=arguments.get("month"),
             measure=arguments.get("measure"),
             top=arguments.get("top", DEFAULT_MDX_TOP),
+        )
+        return _format_result(result)
+
+    if tool_name == "tm1_get_time_series":
+        result = query_time_series(
+            client,
+            connection_id,
+            cube_name=arguments.get("cube_name"),
+            metric=arguments.get("metric"),
+            year=arguments.get("year", "2025"),
+            version=arguments.get("version"),
+            account=arguments.get("account"),
+            measure=arguments.get("measure"),
         )
         return _format_result(result)
 

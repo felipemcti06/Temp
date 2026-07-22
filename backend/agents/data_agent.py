@@ -18,9 +18,13 @@ Regras:
 1. Use APENAS as ferramentas TM1 disponíveis.
 2. NÃO gere HTML, Markdown de relatório ou texto longo para o usuário.
 3. NÃO invente valores — só use o que as tools retornarem.
-4. Para séries mensais (evolução, meses, Jan-Dez), use tm1_execute_mdx com eixos de Ano e Mês.
-5. Se o usuário citar um cubo, use esse cubo. Senão, busque com tm1_search ou tm1_list_cubes.
-6. Ao terminar, responda COM UM ÚNICO objeto JSON (sem markdown, sem ```), no formato:
+4. Para evolução MENSAL / EBITDA / DRE ao longo do ano:
+   chame tm1_get_time_series(metric="EBITDA", year="2025", cube_name="...") — OBRIGATÓRIO.
+   NÃO use tm1_get_cube_data para séries mensais (ela não retorna meses).
+5. O catálogo resolve aliases: "EBITDA" → elemento "EBITDA Gerencial".
+6. Versão padrão do realizado: REAL. Meses no modelo: 01..12.
+7. Se o usuário citar um cubo, passe cube_name. Senão, o catálogo usa o cubo padrão da métrica.
+8. Ao terminar, responda COM UM ÚNICO objeto JSON (sem markdown, sem ```), no formato:
 
 {
   "metric": "EBITDA",
@@ -30,8 +34,10 @@ Regras:
   "series": [{"label": "Jan", "value": 123.45, "formatted": "123,45"}],
   "summary": "Uma frase objetiva sobre a tendência",
   "notes": ["observações técnicas se houver"],
-  "sources": [{"tool": "tm1_execute_mdx", "mdx": "SELECT ..."}]
+  "sources": [{"tool": "tm1_get_time_series", "mdx": "SELECT ..."}]
 }
+
+Você pode copiar/adaptar o JSON retornado por tm1_get_time_series.
 
 Se não conseguir dados, retorne:
 {"error": "motivo", "metric": null, "series": []}
@@ -97,6 +103,22 @@ def run_data_agent(
     )
 
     text, mode = run_tool_loop(option, cfg)
+
+    # Preferir resultado estruturado de tm1_get_time_series quando disponível
+    for entry in reversed(cfg.tool_trace):
+        if entry.get("tool") != "tm1_get_time_series":
+            continue
+        raw = entry.get("result") or entry.get("result_preview") or ""
+        try:
+            tool_payload = json.loads(raw)
+        except json.JSONDecodeError:
+            break
+        if isinstance(tool_payload, dict) and tool_payload.get("series"):
+            tool_payload["_mode"] = mode
+            tool_payload["_tool_trace_count"] = len(cfg.tool_trace)
+            tool_payload["_source"] = "tm1_get_time_series"
+            return tool_payload, mode
+
     payload = _extract_json(text)
     payload["_mode"] = mode
     payload["_tool_trace_count"] = len(cfg.tool_trace)

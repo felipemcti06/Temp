@@ -1,0 +1,32 @@
+{
+  "EBITDA": {
+    "aliases": ["ebitda", "ebitda gerencial", "resultado ebitda"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "EBITDA Gerencial",
+    "account_dim_hint": "Conta",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto"
+  },
+  "EBITDA %": {
+    "aliases": ["ebitda %", "margem ebitda", "ebitda percentual"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "EBITDA %",
+    "account_dim_hint": "Conta",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto"
+  },
+  "Receita Operacional": {
+    "aliases": ["receita", "receita operacional", "receita operacional total"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Receita Operacional Total",
+    "account_dim_hint": "Conta",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto"
+  }
+}

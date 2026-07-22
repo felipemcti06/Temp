@@ -88,7 +88,15 @@ class ToolLoopConfig:
         results: list[tuple[str, str]],
     ) -> None:
         for (_, fn_name, args), (_, result) in zip(tool_calls, results):
-            self.tool_trace.append({"tool": fn_name, "args": args, "result_preview": result[:500]})
+            entry: dict[str, Any] = {
+                "tool": fn_name,
+                "args": args,
+                "result_preview": result[:500],
+            }
+            # Manter payload completo para tools estruturadas usadas pelo pipeline
+            if fn_name in {"tm1_get_time_series", "create_html_report"}:
+                entry["result"] = result
+            self.tool_trace.append(entry)
             if fn_name != "create_html_report":
                 continue
             try:

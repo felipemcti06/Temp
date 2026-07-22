@@ -1,6 +1,7 @@
 import os
 import re
 
+from agents.fast_path import try_fast_report_path
 from agents.orchestrator import run_report_pipeline
 from llm_config import has_anthropic_key, has_openai_key, resolve_model_id
 from llm_runner import generate_with_model
@@ -122,6 +123,16 @@ def generate_response(
 
     mcp_client = TM1MCPClient.from_env() if tm1_is_configured() else None
     wants_report = _needs_report(messages)
+
+    # Fase 2: fast path determinístico (glossário + Jinja2, sem LLM)
+    if wants_report and mcp_client:
+        fast_result = try_fast_report_path(
+            messages,
+            mcp_client,
+            username=username,
+        )
+        if fast_result:
+            return fast_result
 
     # Fase 1: pipeline de subagentes para pedidos de relatório HTML
     if wants_report and mcp_client and _agents_enabled():

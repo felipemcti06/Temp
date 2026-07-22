@@ -21,7 +21,9 @@ Regras:
 4. Para evolução MENSAL / EBITDA / DRE ao longo do ano:
    chame tm1_get_time_series(metric="EBITDA", year="2025", cube_name="...") — OBRIGATÓRIO.
    NÃO use tm1_get_cube_data para séries mensais (ela não retorna meses).
-5. O catálogo resolve aliases: "EBITDA" → elemento "EBITDA Gerencial".
+5. O catálogo resolve aliases (ex: "EBITDA" → "EBITDA Gerencial") e inclui:
+   EBITDA, EBITDA %, Receita Operacional, Margem Financeira Bruta/Líquida,
+   Resultado Operacional, Sobra do Exercício, Despesas Administrativas/Pessoal e %.
 6. Versão padrão do realizado: REAL. Meses no modelo: 01..12.
 7. Se o usuário citar um cubo, passe cube_name. Senão, o catálogo usa o cubo padrão da métrica.
 8. Ao terminar, responda COM UM ÚNICO objeto JSON (sem markdown, sem ```), no formato:

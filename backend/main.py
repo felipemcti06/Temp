@@ -2,10 +2,17 @@ import uuid
 import os
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from auth import (
+    auth_is_enabled,
+    create_access_token,
+    get_current_user,
+    get_optional_user,
+    verify_credentials,
+)
 from chat_engine import any_llm_configured, generate_response
 from llm_config import list_available_models, resolve_default_model_id
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id, tm1_is_configured
@@ -18,7 +25,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -62,6 +69,23 @@ class TM1StatusResponse(BaseModel):
     error: str | None = None
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=100)
+    password: str = Field(..., min_length=1, max_length=200)
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int = 86400
+
+
+class AuthStatusResponse(BaseModel):
+    auth_required: bool
+    authenticated: bool = False
+    username: str | None = None
+
+
 def _resolve_mode() -> str:
     if any_llm_configured() and tm1_is_configured():
         return "ai+tm1"
@@ -81,8 +105,29 @@ async def health():
     )
 
 
+@app.get("/api/auth/status", response_model=AuthStatusResponse)
+async def auth_status(user: str | None = Depends(get_optional_user)):
+    return AuthStatusResponse(
+        auth_required=auth_is_enabled(),
+        authenticated=user is not None,
+        username=user,
+    )
+
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+async def login(request: LoginRequest):
+    if not auth_is_enabled():
+        raise HTTPException(status_code=400, detail="Autenticação não está configurada no servidor")
+
+    if not verify_credentials(request.username, request.password):
+        raise HTTPException(status_code=401, detail="Usuário ou senha incorretos")
+
+    token = create_access_token(request.username)
+    return LoginResponse(access_token=token)
+
+
 @app.get("/api/models", response_model=ModelsResponse)
-async def models():
+async def models(_user: str | None = Depends(get_current_user)):
     return ModelsResponse(
         models=list_available_models(),
         default=resolve_default_model_id(),
@@ -90,7 +135,7 @@ async def models():
 
 
 @app.get("/api/tm1/status", response_model=TM1StatusResponse)
-async def tm1_status():
+async def tm1_status(_user: str | None = Depends(get_current_user)):
     client = TM1MCPClient.from_env()
     connection_id = get_default_connection_id()
 
@@ -120,7 +165,7 @@ async def tm1_status():
 
 
 @app.post("/api/chat", response_model=MessageResponse)
-async def chat(request: MessageRequest):
+async def chat(request: MessageRequest, _user: str | None = Depends(get_current_user)):
     session_id = request.session_id or str(uuid.uuid4())
 
     if session_id not in sessions:
@@ -152,6 +197,6 @@ async def chat(request: MessageRequest):
 
 
 @app.delete("/api/chat/{session_id}")
-async def clear_session(session_id: str):
+async def clear_session(session_id: str, _user: str | None = Depends(get_current_user)):
     sessions.pop(session_id, None)
     return {"status": "cleared", "session_id": session_id}

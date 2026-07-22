@@ -27,6 +27,18 @@ AVAILABLE_MODELS: list[ModelOption] = [
     ModelOption("openai/gpt-4o-mini", "openai", "gpt-4o-mini", "GPT-4o Mini"),
     ModelOption("openai/gpt-4o", "openai", "gpt-4o", "GPT-4o"),
     ModelOption(
+        "anthropic/claude-opus-4-7",
+        "anthropic",
+        "claude-opus-4-7",
+        "Claude Opus 4.7",
+    ),
+    ModelOption(
+        "anthropic/claude-opus-4-6",
+        "anthropic",
+        "claude-opus-4-6",
+        "Claude Opus 4.6",
+    ),
+    ModelOption(
         "anthropic/claude-sonnet-5",
         "anthropic",
         "claude-sonnet-5",

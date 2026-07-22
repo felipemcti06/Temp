@@ -1,0 +1,150 @@
+{
+  "EBITDA": {
+    "aliases": ["ebitda", "ebitda gerencial", "resultado ebitda"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "EBITDA Gerencial",
+    "account_dim_hint": "Conta",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "currency"
+  },
+  "EBITDA %": {
+    "aliases": ["ebitda %", "margem ebitda", "ebitda percentual"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "EBITDA %",
+    "account_dim_hint": "Conta",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "percent"
+  },
+  "Receita Operacional": {
+    "aliases": ["receita", "receita operacional", "receita operacional total"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Receita Operacional Total",
+    "account_dim_hint": "Conta",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "currency"
+  },
+  "Margem Financeira Bruta": {
+    "aliases": ["margem financeira bruta", "margem bruta", "mfb"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Margem Financeira Bruta",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "currency"
+  },
+  "Margem Financeira Líquida": {
+    "aliases": ["margem financeira líquida", "margem financeira liquida", "margem líquida", "mfl"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Margem Financeira Líquida",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "currency"
+  },
+  "Resultado Operacional": {
+    "aliases": ["resultado operacional", "resultado operacional gerencial", "ro gerencial"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Resultado Operacional (Ger.)",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "currency"
+  },
+  "Resultado Antes de Tributos": {
+    "aliases": [
+      "resultado antes de tributos",
+      "resultado antes de tributos e participações",
+      "lair",
+      "ebt"
+    ],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Resultado Antes de Tributos e Participações",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "currency"
+  },
+  "Sobra do Exercício": {
+    "aliases": ["sobra do exercício", "sobra do exercicio", "lucro líquido", "lucro liquido", "resultado líquido"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Sobra do Exercício",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "currency"
+  },
+  "Despesas Administrativas": {
+    "aliases": ["despesas administrativas", "despesa administrativa", "dadm"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Despesas Administrativas",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "currency"
+  },
+  "Despesas de Pessoal": {
+    "aliases": ["despesas de pessoal", "despesa de pessoal", "folha", "pessoal"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Despesas de Pessoal",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "currency"
+  },
+  "Margem Financeira Bruta %": {
+    "aliases": ["margem financeira bruta %", "margem bruta %", "mfb %"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Margem Financeira Bruta %",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "percent"
+  },
+  "Margem Financeira Líquida %": {
+    "aliases": ["margem financeira líquida %", "margem financeira liquida %", "mfl %"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Margem Financeira Líquida %",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "percent"
+  },
+  "Resultado Operacional %": {
+    "aliases": ["resultado operacional %", "ro %", "margem operacional"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Resultado Operacional %",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "percent"
+  },
+  "Sobra do Exercício %": {
+    "aliases": ["sobra do exercício %", "sobra do exercicio %", "margem líquida %"],
+    "cube": "RTB.100.DRE_Produto",
+    "account": "Sobra do Exercício %",
+    "version": "REAL",
+    "measure": "Valor",
+    "filial": "Total_Filial",
+    "produto": "Total_Produto",
+    "format": "percent"
+  }
+}

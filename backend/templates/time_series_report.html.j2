@@ -1,0 +1,97 @@
+<h1>{{ title }}</h1>
+<p class="report-meta">
+  {{ metric }} · {{ period }} · Versão {{ version }} · Cubo {{ cube }}
+</p>
+
+<section>
+  <h2>Resumo executivo</h2>
+  <p>{{ summary }}</p>
+</section>
+
+<section class="kpi-row">
+  <div class="kpi">
+    <span>Jan/{{ period[-2:] }}</span>
+    <strong>{{ kpis.first }}</strong>
+  </div>
+  <div class="kpi">
+    <span>Dez/{{ period[-2:] }}</span>
+    <strong>{{ kpis.last }}</strong>
+  </div>
+  <div class="kpi">
+    <span>Variação no ano</span>
+    <strong>{{ kpis.change }}</strong>
+  </div>
+  <div class="kpi">
+    <span>Máximo</span>
+    <strong>{{ kpis.max_value }} ({{ kpis.max_month }})</strong>
+  </div>
+  <div class="kpi">
+    <span>Mínimo</span>
+    <strong>{{ kpis.min_value }} ({{ kpis.min_month }})</strong>
+  </div>
+</section>
+
+<section>
+  <h2>Evolução mensal</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Mês</th>
+        <th>Valor</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in series %}
+      <tr>
+        <td>{{ row.label }}</td>
+        <td>{{ row.formatted or row.value or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Gráfico</h2>
+  <div class="chart-container">
+    <canvas id="chart"></canvas>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function () {
+  const labels = {{ chart_labels | tojson }};
+  const values = {{ chart_values | tojson }};
+  const ctx = document.getElementById("chart");
+  if (!ctx || !labels.length) return;
+
+  new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: {{ metric | tojson }},
+        data: values,
+        borderColor: "#4f46e5",
+        backgroundColor: "rgba(79, 70, 229, 0.12)",
+        fill: true,
+        tension: 0.25,
+        pointRadius: 3,
+        pointHoverRadius: 5
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      aspectRatio: 2.2,
+      plugins: {
+        legend: { position: "bottom" }
+      },
+      scales: {
+        y: { beginAtZero: false }
+      }
+    }
+  });
+})();
+</script>

@@ -12,20 +12,22 @@ from tm1_tools import OPENAI_TOOL_DEFINITIONS, execute_tm1_tool
 SYSTEM_PROMPT = """Você é um assistente virtual chamado ChatBot, especializado em IBM Planning Analytics / TM1.
 Responda sempre em português brasileiro de forma clara, concisa e educada.
 
-Quando o usuário perguntar sobre cubos, dimensões, dados ou o modelo TM1, use as ferramentas
-disponíveis para buscar dados reais do servidor antes de responder. Nunca invente nomes de cubos,
-dimensões ou valores.
+IMPORTANTE: Você TEM acesso ao servidor TM1 via ferramentas. NUNCA diga que não pode acessar dados,
+cubos ou o ambiente TM1. Sempre use as ferramentas para consultar antes de responder.
 
-Capacidades TM1 (Fase 2):
+Quando o usuário pedir dados, valores, totais ou informações de um ano (ex: 2025):
+1. Se não souber o cubo, chame tm1_list_cubes
+2. Chame tm1_cube_summary para ver as dimensões do cubo
+3. Chame tm1_execute_mdx para buscar os valores reais
+4. Apresente os dados retornados de forma clara
+
+Nunca invente nomes de cubos, dimensões ou valores numéricos.
+
+Capacidades TM1:
 - Listar cubos, dimensões e processos
-- Executar consultas MDX para obter valores
+- Executar consultas MDX para obter valores de células
 - Buscar texto no modelo e nas regras
-- Ler regras de cubos e listar elementos de dimensões
-
-Para consultas MDX, monte a query corretamente. Se não souber a estrutura do cubo,
-use cube_summary ou list_cubes antes. Limite resultados grandes e resuma para o usuário.
-
-Se não houver integração TM1 configurada, informe isso e responda de forma geral."""
+- Ler regras de cubos e listar elementos de dimensões"""
 
 
 FALLBACK_RESPONSES = {
@@ -97,6 +99,21 @@ def _build_tools() -> list[dict] | None:
     return OPENAI_TOOL_DEFINITIONS
 
 
+def _needs_tm1_tools(messages: list[dict]) -> bool:
+    last_user = next(
+        (m["content"] for m in reversed(messages) if m["role"] == "user"),
+        "",
+    )
+    text = last_user.lower()
+    patterns = [
+        r"\b(dados?|valores?|total|resumo|consulta|mostra|exibe|lista)\b",
+        r"\b20\d{2}\b",
+        r"\b(cubo|cubos|mdx|tm1|dimensão|dimensões|rentabilidade|dre)\b",
+        r"\b(financeiro|rateio|receita|despesa)\b",
+    ]
+    return any(re.search(p, text) for p in patterns)
+
+
 def _run_with_tools(
     client: OpenAI,
     messages: list[dict],
@@ -105,16 +122,20 @@ def _run_with_tools(
 ) -> tuple[str, str]:
     tools = _build_tools()
     api_messages = [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
+    force_tools = _needs_tm1_tools(messages)
+    temperature = 0.2 if force_tools else 0.7
 
-    for _ in range(10):
+    for iteration in range(10):
         kwargs: dict = {
             "model": model,
             "messages": api_messages,
             "max_tokens": 1024,
-            "temperature": 0.7,
+            "temperature": temperature,
         }
         if tools:
             kwargs["tools"] = tools
+            if force_tools and iteration == 0:
+                kwargs["tool_choice"] = "required"
 
         completion = client.chat.completions.create(**kwargs)
         choice = completion.choices[0]

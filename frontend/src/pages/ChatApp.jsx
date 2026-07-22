@@ -17,6 +17,13 @@ const MODE_LABELS = {
   error: 'Erro de configuração',
 }
 
+function formatModeLabel(mode) {
+  if (MODE_LABELS[mode]) return MODE_LABELS[mode]
+  if (mode.startsWith('agents(')) return 'Agentes (dados → relatório)'
+  if (mode.includes('+fallback')) return 'IA (fallback)'
+  return mode
+}
+
 export default function ChatApp() {
   const { username, handleLogout } = useAuth()
   const [messages, setMessages] = useState([])
@@ -118,7 +125,7 @@ export default function ChatApp() {
     [sessionId, modelId, handleLogout],
   )
 
-  const modeLabel = MODE_LABELS[mode] || mode
+  const modeLabel = formatModeLabel(mode)
 
   return (
     <div className="app">
@@ -149,7 +156,7 @@ export default function ChatApp() {
       <ChatWindow messages={messages} onSend={sendMessage} loading={loading} />
 
       <footer className="app-footer">
-        ChatBot v1.3 · OpenAI + Claude + TM1 + Relatórios
+        ChatBot v1.4 · Agentes TM1 + Relatórios
       </footer>
     </div>
   )

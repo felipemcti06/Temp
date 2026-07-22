@@ -1,15 +1,21 @@
+"""Loop genérico de LLM + tools, reutilizável por agentes."""
+
+from __future__ import annotations
+
 import json
 import os
-import re
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Callable
 
 from anthropic import Anthropic
 from openai import OpenAI
 
 from llm_config import ModelOption
-from report_tools import REPORT_TOOL_DEFINITIONS, execute_report_tool
+from report_tools import execute_report_tool
 from tm1_mcp import TM1MCPClient, TM1MCPError
-from tm1_tools import OPENAI_TOOL_DEFINITIONS, execute_tm1_tool
+from tm1_tools import execute_tm1_tool
+
+DEFAULT_MAX_ITERATIONS = int(os.getenv("TM1_MAX_ITERATIONS", "20"))
 
 SYSTEM_PROMPT = """Você é um assistente virtual chamado ChatBot, especializado em IBM Planning Analytics / TM1.
 Responda sempre em português brasileiro de forma clara, concisa e educada.
@@ -50,37 +56,39 @@ Capacidades TM1:
 - Publicar relatórios HTML em /relatorio/{id}"""
 
 
-MAX_TM1_ITERATIONS = int(os.getenv("TM1_MAX_ITERATIONS", "20"))
+ToolExecutor = Callable[[str, dict[str, Any]], str]
 
 
-class ToolLoopContext:
-    def __init__(
-        self,
-        messages: list[dict],
-        mcp_client: TM1MCPClient | None,
-        force_tools: bool,
-        username: str | None = None,
-        needs_report: bool = False,
-    ):
-        self.messages = messages
-        self.mcp_client = mcp_client
-        self.force_tools = force_tools
-        self.username = username
-        self.needs_report = needs_report
-        self.report_created = False
-        self.report_url: str | None = None
-        self.use_tm1 = mcp_client is not None
-        self.tools: list[dict[str, Any]] = list(REPORT_TOOL_DEFINITIONS)
-        if self.use_tm1:
-            self.tools.extend(OPENAI_TOOL_DEFINITIONS)
+@dataclass
+class ToolLoopConfig:
+    messages: list[dict]
+    tools: list[dict[str, Any]]
+    system_prompt: str
+    mcp_client: TM1MCPClient | None = None
+    username: str | None = None
+    force_tools: bool = False
+    needs_report: bool = False
+    max_iterations: int = DEFAULT_MAX_ITERATIONS
+    max_tokens: int = 8192
+    temperature: float = 0.2
+    mode_prefix: str = "ai"
+    tool_executor: ToolExecutor | None = None
+    report_created: bool = False
+    report_url: str | None = None
+    tool_trace: list[dict[str, Any]] = field(default_factory=list)
 
     def should_force_tools(self) -> bool:
         if self.needs_report and not self.report_created:
             return True
         return self.force_tools
 
-    def note_tool_results(self, tool_calls: list[tuple[str, str, dict]], results: list[tuple[str, str]]) -> None:
-        for (_, fn_name, _), (_, result) in zip(tool_calls, results):
+    def note_tool_results(
+        self,
+        tool_calls: list[tuple[str, str, dict]],
+        results: list[tuple[str, str]],
+    ) -> None:
+        for (_, fn_name, args), (_, result) in zip(tool_calls, results):
+            self.tool_trace.append({"tool": fn_name, "args": args, "result_preview": result[:500]})
             if fn_name != "create_html_report":
                 continue
             try:
@@ -94,8 +102,23 @@ class ToolLoopContext:
     def report_pending_nudge(self) -> str:
         return (
             "Você ainda NÃO publicou o relatório. Chame create_html_report AGORA com o HTML "
-            "completo (título, resumo executivo, tabela de dados). Não responda apenas com texto."
+            "completo (título, resumo executivo, tabela de dados e gráfico se pedido). "
+            "Não responda apenas com texto."
         )
+
+
+def default_tool_executor(
+    mcp_client: TM1MCPClient | None,
+    fn_name: str,
+    fn_args: dict[str, Any],
+    *,
+    username: str | None,
+) -> str:
+    if fn_name == "create_html_report":
+        return execute_report_tool(fn_args, created_by=username)
+    if not mcp_client:
+        return f"Ferramenta {fn_name} requer conexão TM1, que não está disponível."
+    return execute_tm1_tool(mcp_client, fn_name, fn_args)
 
 
 def _to_anthropic_tools(tools: list[dict]) -> list[dict]:
@@ -109,64 +132,44 @@ def _to_anthropic_tools(tools: list[dict]) -> list[dict]:
     ]
 
 
-def _execute_tool(
-    mcp_client: TM1MCPClient | None,
-    fn_name: str,
-    fn_args: dict[str, Any],
-    *,
-    username: str | None,
-) -> str:
-    if fn_name == "create_html_report":
-        return execute_report_tool(fn_args, created_by=username)
-
-    if not mcp_client:
-        return f"Ferramenta {fn_name} requer conexão TM1, que não está disponível."
-
-    return execute_tm1_tool(mcp_client, fn_name, fn_args)
-
-
-def _run_tool_calls(
-    mcp_client: TM1MCPClient | None,
-    tool_calls: list[tuple[str, str, dict]],
-    *,
-    username: str | None,
-) -> list[tuple[str, str]]:
+def _run_tool_calls(cfg: ToolLoopConfig, tool_calls: list[tuple[str, str, dict]]) -> list[tuple[str, str]]:
     results = []
+    executor = cfg.tool_executor
     for call_id, fn_name, fn_args in tool_calls:
         try:
-            result = _execute_tool(mcp_client, fn_name, fn_args, username=username)
+            if executor:
+                result = executor(fn_name, fn_args)
+            else:
+                result = default_tool_executor(
+                    cfg.mcp_client, fn_name, fn_args, username=cfg.username
+                )
         except (TM1MCPError, json.JSONDecodeError, KeyError, ValueError) as exc:
             result = f"Erro ao executar {fn_name}: {exc}"
         results.append((call_id, result))
     return results
 
 
-def _finalize_response(content: str, ctx: ToolLoopContext) -> str:
+def _finalize_response(content: str, cfg: ToolLoopConfig) -> str:
     text = content.strip() or "Não consegui gerar uma resposta."
-    if ctx.report_url and ctx.report_url not in text:
-        text = f"{text}\n\nRelatório publicado: {ctx.report_url}"
+    if cfg.report_url and cfg.report_url not in text:
+        text = f"{text}\n\nRelatório publicado: {cfg.report_url}"
     return text
 
 
-def _openai_tool_loop(
-    client: OpenAI,
-    model: str,
-    ctx: ToolLoopContext,
-    mode_prefix: str,
-) -> tuple[str, str]:
-    api_messages = [{"role": "system", "content": SYSTEM_PROMPT}, *ctx.messages]
-    temperature = 0.2 if ctx.should_force_tools() else 0.7
+def _openai_tool_loop(client: OpenAI, model: str, cfg: ToolLoopConfig) -> tuple[str, str]:
+    api_messages = [{"role": "system", "content": cfg.system_prompt}, *cfg.messages]
+    temperature = cfg.temperature if cfg.should_force_tools() else max(cfg.temperature, 0.5)
 
-    for _ in range(MAX_TM1_ITERATIONS):
+    for _ in range(cfg.max_iterations):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": api_messages,
-            "max_tokens": 8192,
+            "max_tokens": cfg.max_tokens,
             "temperature": temperature,
         }
-        if ctx.tools:
-            kwargs["tools"] = ctx.tools
-            if ctx.should_force_tools():
+        if cfg.tools:
+            kwargs["tools"] = cfg.tools
+            if cfg.should_force_tools():
                 kwargs["tool_choice"] = "required"
 
         completion = client.chat.completions.create(**kwargs)
@@ -195,59 +198,52 @@ def _openai_tool_loop(
                     ],
                 }
             )
-            tool_results = _run_tool_calls(ctx.mcp_client, tool_batch, username=ctx.username)
-            ctx.note_tool_results(tool_batch, tool_results)
+            tool_results = _run_tool_calls(cfg, tool_batch)
+            cfg.note_tool_results(tool_batch, tool_results)
             for call_id, result in tool_results:
-                api_messages.append(
-                    {"role": "tool", "tool_call_id": call_id, "content": result}
-                )
-            if not ctx.needs_report or ctx.report_created:
-                ctx.force_tools = False
+                api_messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
+            if not cfg.needs_report or cfg.report_created:
+                cfg.force_tools = False
             continue
 
         content = message.content or ""
-        if ctx.needs_report and not ctx.report_created:
+        if cfg.needs_report and not cfg.report_created:
             api_messages.append({"role": "assistant", "content": content or "..."})
-            api_messages.append({"role": "user", "content": ctx.report_pending_nudge()})
+            api_messages.append({"role": "user", "content": cfg.report_pending_nudge()})
             continue
 
-        suffix = "+tm1" if ctx.use_tm1 else ""
-        return _finalize_response(content, ctx), f"{mode_prefix}{suffix}"
+        suffix = "+tm1" if cfg.mcp_client else ""
+        return _finalize_response(content, cfg), f"{cfg.mode_prefix}{suffix}"
 
     return (
         "Não foi possível concluir a solicitação. "
         + (
             "O relatório HTML não foi publicado — tente novamente."
-            if ctx.needs_report and not ctx.report_created
+            if cfg.needs_report and not cfg.report_created
             else "Tente uma pergunta mais específica."
         ),
-        f"{mode_prefix}+tm1" if ctx.use_tm1 else mode_prefix,
+        f"{cfg.mode_prefix}+tm1" if cfg.mcp_client else cfg.mode_prefix,
     )
 
 
-def _anthropic_tool_loop(
-    client: Anthropic,
-    model: str,
-    ctx: ToolLoopContext,
-    mode_prefix: str,
-) -> tuple[str, str]:
+def _anthropic_tool_loop(client: Anthropic, model: str, cfg: ToolLoopConfig) -> tuple[str, str]:
     anthropic_messages = [
         {"role": m["role"], "content": m["content"]}
-        for m in ctx.messages
+        for m in cfg.messages
         if m["role"] in ("user", "assistant")
     ]
-    tools = _to_anthropic_tools(ctx.tools) if ctx.tools else None
+    tools = _to_anthropic_tools(cfg.tools) if cfg.tools else None
 
-    for _ in range(MAX_TM1_ITERATIONS):
+    for _ in range(cfg.max_iterations):
         kwargs: dict[str, Any] = {
             "model": model,
-            "max_tokens": 8192,
-            "system": SYSTEM_PROMPT,
+            "max_tokens": cfg.max_tokens,
+            "system": cfg.system_prompt,
             "messages": anthropic_messages,
         }
         if tools:
             kwargs["tools"] = tools
-            if ctx.should_force_tools():
+            if cfg.should_force_tools():
                 kwargs["tool_choice"] = {"type": "any"}
 
         response = client.messages.create(**kwargs)
@@ -259,10 +255,8 @@ def _anthropic_tool_loop(
                 for block in response.content
                 if block.type == "tool_use"
             ]
-            tool_results = _run_tool_calls(
-                ctx.mcp_client, tool_calls, username=ctx.username
-            )
-            ctx.note_tool_results(tool_calls, tool_results)
+            tool_results = _run_tool_calls(cfg, tool_calls)
+            cfg.note_tool_results(tool_calls, tool_results)
             anthropic_messages.append(
                 {
                     "role": "user",
@@ -276,33 +270,42 @@ def _anthropic_tool_loop(
                     ],
                 }
             )
-            if not ctx.needs_report or ctx.report_created:
-                ctx.force_tools = False
+            if not cfg.needs_report or cfg.report_created:
+                cfg.force_tools = False
             continue
 
         parts = [block.text for block in response.content if block.type == "text"]
         content = "".join(parts)
-        if ctx.needs_report and not ctx.report_created:
+        if cfg.needs_report and not cfg.report_created:
             anthropic_messages.append({"role": "assistant", "content": response.content})
-            anthropic_messages.append({"role": "user", "content": ctx.report_pending_nudge()})
+            anthropic_messages.append({"role": "user", "content": cfg.report_pending_nudge()})
             continue
 
-        suffix = "+tm1" if ctx.use_tm1 else ""
-        return _finalize_response(content, ctx), f"{mode_prefix}{suffix}"
+        suffix = "+tm1" if cfg.mcp_client else ""
+        return _finalize_response(content, cfg), f"{cfg.mode_prefix}{suffix}"
 
     return (
         "Não foi possível concluir a solicitação. "
         + (
             "O relatório HTML não foi publicado — tente novamente."
-            if ctx.needs_report and not ctx.report_created
+            if cfg.needs_report and not cfg.report_created
             else "Tente uma pergunta mais específica."
         ),
-        f"{mode_prefix}+tm1" if ctx.use_tm1 else mode_prefix,
+        f"{cfg.mode_prefix}+tm1" if cfg.mcp_client else cfg.mode_prefix,
     )
 
 
-def _should_use_tools(mcp_client: TM1MCPClient | None, force_tools: bool) -> bool:
-    return force_tools or mcp_client is not None
+def run_tool_loop(option: ModelOption, cfg: ToolLoopConfig) -> tuple[str, str]:
+    """Executa um loop LLM+tools com configuração customizada."""
+    if option.provider == "openai":
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        return _openai_tool_loop(client, option.model, cfg)
+
+    if option.provider == "anthropic":
+        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        return _anthropic_tool_loop(client, option.model, cfg)
+
+    raise ValueError(f"Provedor não suportado: {option.provider}")
 
 
 def generate_with_model(
@@ -313,39 +316,62 @@ def generate_with_model(
     force_tools: bool,
     needs_report: bool = False,
     username: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    system_prompt: str | None = None,
+    mode_prefix: str | None = None,
+    max_iterations: int | None = None,
 ) -> tuple[str, str]:
-    ctx = ToolLoopContext(
-        messages, mcp_client, force_tools, username=username, needs_report=needs_report
+    from report_tools import REPORT_TOOL_DEFINITIONS
+    from tm1_tools import OPENAI_TOOL_DEFINITIONS
+
+    if tools is None:
+        tools = list(REPORT_TOOL_DEFINITIONS)
+        if mcp_client is not None:
+            tools.extend(OPENAI_TOOL_DEFINITIONS)
+
+    use_tools = force_tools or needs_report or mcp_client is not None
+    prefix = mode_prefix or option.provider
+
+    if not use_tools or not tools:
+        if option.provider == "openai":
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            completion = client.chat.completions.create(
+                model=option.model,
+                messages=[
+                    {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
+                    *messages,
+                ],
+                max_tokens=1024,
+                temperature=0.7,
+            )
+            return completion.choices[0].message.content or "", prefix
+
+        if option.provider == "anthropic":
+            client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+            response = client.messages.create(
+                model=option.model,
+                max_tokens=1024,
+                system=system_prompt or SYSTEM_PROMPT,
+                messages=[
+                    {"role": m["role"], "content": m["content"]}
+                    for m in messages
+                    if m["role"] in ("user", "assistant")
+                ],
+            )
+            text = "".join(b.text for b in response.content if b.type == "text")
+            return text or "", prefix
+
+        raise ValueError(f"Provedor não suportado: {option.provider}")
+
+    cfg = ToolLoopConfig(
+        messages=messages,
+        tools=tools,
+        system_prompt=system_prompt or SYSTEM_PROMPT,
+        mcp_client=mcp_client,
+        username=username,
+        force_tools=force_tools,
+        needs_report=needs_report,
+        max_iterations=max_iterations or DEFAULT_MAX_ITERATIONS,
+        mode_prefix=prefix,
     )
-    use_tools = _should_use_tools(mcp_client, force_tools)
-
-    if option.provider == "openai":
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        if use_tools:
-            return _openai_tool_loop(client, option.model, ctx, "openai")
-        completion = client.chat.completions.create(
-            model=option.model,
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}, *messages],
-            max_tokens=1024,
-            temperature=0.7,
-        )
-        return completion.choices[0].message.content or "", "openai"
-
-    if option.provider == "anthropic":
-        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        if use_tools:
-            return _anthropic_tool_loop(client, option.model, ctx, "anthropic")
-        response = client.messages.create(
-            model=option.model,
-            max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in messages
-                if m["role"] in ("user", "assistant")
-            ],
-        )
-        text = "".join(b.text for b in response.content if b.type == "text")
-        return text or "", "anthropic"
-
-    raise ValueError(f"Provedor não suportado: {option.provider}")
+    return run_tool_loop(option, cfg)

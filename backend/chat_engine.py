@@ -1,7 +1,8 @@
 import os
 import re
 
-from llm_config import ModelOption, has_anthropic_key, has_openai_key, resolve_model_id
+from agents.orchestrator import run_report_pipeline
+from llm_config import has_anthropic_key, has_openai_key, resolve_model_id
 from llm_runner import generate_with_model
 from tm1_mcp import TM1MCPClient, tm1_is_configured
 
@@ -24,7 +25,9 @@ FALLBACK_RESPONSES = {
     ],
     "ajuda": [
         "Posso consultar seu TM1 e responder com OpenAI ou Claude. "
-        "Escolha o modelo no seletor acima do chat.",
+        "Escolha o modelo no seletor acima do chat. "
+        "Para relatórios HTML, uso um agente de dados (modelo econômico) "
+        "e um agente de relatório (modelo premium).",
         "Sou um chatbot com integração TM1! Selecione GPT ou Claude no topo da tela.",
     ],
     "tm1": [
@@ -62,10 +65,6 @@ def _fallback_response(text: str) -> str:
     return responses[len(text) % len(responses)]
 
 
-def _has_openai_key() -> bool:
-    return has_openai_key()
-
-
 def _needs_report(messages: list[dict]) -> bool:
     last_user = next(
         (m["content"] for m in reversed(messages) if m["role"] == "user"),
@@ -88,9 +87,18 @@ def _needs_tm1_tools(messages: list[dict]) -> bool:
         r"\b20\d{2}\b",
         r"\b(cubo|cubos|mdx|tm1|dimensão|dimensões|rentabilidade|dre|ebitda)\b",
         r"\b(financeiro|rateio|receita|despesa)\b",
-        r"\b(html|relatório|relatorio|relatório|dashboard|executivo|gráfico|grafico)\b",
+        r"\b(html|relatório|relatorio|dashboard|executivo|gráfico|grafico)\b",
     ]
     return any(re.search(p, text) for p in patterns)
+
+
+def _agents_enabled() -> bool:
+    return os.getenv("ENABLE_REPORT_AGENTS", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def generate_response(
@@ -114,6 +122,30 @@ def generate_response(
 
     mcp_client = TM1MCPClient.from_env() if tm1_is_configured() else None
     wants_report = _needs_report(messages)
+
+    # Fase 1: pipeline de subagentes para pedidos de relatório HTML
+    if wants_report and mcp_client and _agents_enabled():
+        try:
+            return run_report_pipeline(
+                messages,
+                option,
+                mcp_client=mcp_client,
+                username=username,
+            )
+        except Exception as exc:
+            # Fallback para o fluxo monolítico se o pipeline falhar
+            err_note = f"(Pipeline de agentes falhou: {exc}. Usando fluxo padrão.)\n\n"
+            force_tools = True
+            text, mode = generate_with_model(
+                messages,
+                option,
+                mcp_client=mcp_client,
+                force_tools=force_tools,
+                needs_report=True,
+                username=username,
+            )
+            return err_note + text, f"{mode}+fallback"
+
     force_tools = bool(mcp_client and (_needs_tm1_tools(messages) or wants_report))
 
     return generate_with_model(

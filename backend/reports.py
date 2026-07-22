@@ -11,6 +11,33 @@ from datetime import datetime, timedelta, timezone
 REPORT_TTL_HOURS = int(os.getenv("REPORT_TTL_HOURS", "24"))
 MAX_HTML_CHARS = 500_000
 
+CHART_SAFE_CSS = """
+    .chart-container {
+      position: relative;
+      height: 420px;
+      max-height: 420px;
+      width: 100%;
+      max-width: 900px;
+      margin: 1.5rem auto;
+      overflow: hidden;
+    }
+    .chart-container canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 420px;
+    }
+    canvas[id*="chart" i] {
+      display: block;
+      max-width: 900px;
+      max-height: 420px !important;
+      height: 420px !important;
+      width: 100% !important;
+    }
+    body {
+      overflow-x: hidden;
+    }
+"""
+
 _reports: dict[str, Report] = {}
 
 
@@ -83,12 +110,43 @@ def wrap_html_document(title: str, body: str) -> str:
       box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }}
     .kpi strong {{ display: block; font-size: 1.4rem; color: #4f46e5; }}
+    {CHART_SAFE_CSS}
   </style>
 </head>
 <body>
 {body}
 </body>
 </html>"""
+
+
+def _needs_chart_css(html: str) -> bool:
+    lower = html.lower()
+    return "<canvas" in lower or "chart.js" in lower or "new chart(" in lower
+
+
+def _inject_chart_safe_css(html: str) -> str:
+    """Evita loop de resize do Chart.js quando o LLM gera HTML completo."""
+    if not _needs_chart_css(html):
+        return html
+
+    marker = 'id="chart-safe-css"'
+    if marker in html:
+        return html
+
+    style_tag = f'<style {marker}>\n{CHART_SAFE_CSS}\n</style>'
+    lower = html.lower()
+
+    if "</head>" in lower:
+        idx = lower.rfind("</head>")
+        return html[:idx] + style_tag + "\n" + html[idx:]
+
+    if "<body" in lower:
+        body_idx = lower.find("<body")
+        body_end = html.find(">", body_idx)
+        if body_end != -1:
+            return html[: body_end + 1] + "\n" + style_tag + html[body_end + 1 :]
+
+    return style_tag + "\n" + html
 
 
 def create_report(title: str, html: str, *, created_by: str | None = None) -> dict[str, str]:
@@ -103,7 +161,7 @@ def create_report(title: str, html: str, *, created_by: str | None = None) -> di
 
     report_id = str(uuid.uuid4())
     now = _utcnow()
-    document = wrap_html_document(title.strip(), html.strip())
+    document = _inject_chart_safe_css(wrap_html_document(title.strip(), html.strip()))
 
     _reports[report_id] = Report(
         id=report_id,

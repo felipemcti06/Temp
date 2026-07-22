@@ -41,10 +41,11 @@ Exemplo de HTML no relatório:
 <p>Resumo executivo...</p>
 <table><thead>...</thead><tbody>...</tbody></table>
 
-Para gráficos interativos, use Chart.js via CDN com script inline e canvas com altura definida:
+Para gráficos interativos, use Chart.js com container fixo (evita expansão infinita):
+<div class="chart-container"><canvas id="chart"></canvas></div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<canvas id="chart" style="max-width:800px;height:400px"></canvas>
-<script>/* new Chart(document.getElementById('chart'), {...}) */</script>
+<script>new Chart(document.getElementById('chart'), { options: { responsive: true, maintainAspectRatio: true, aspectRatio: 2.2 } });</script>
+NUNCA use maintainAspectRatio: false nem height no canvas.
 
 Nunca invente nomes de cubos, dimensões ou valores numéricos.
 

@@ -6,7 +6,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from chat_engine import _has_openai_key, generate_response
+from chat_engine import any_llm_configured, generate_response
+from llm_config import list_available_models, resolve_default_model_id
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id, tm1_is_configured
 
 app = FastAPI(
@@ -29,12 +30,14 @@ sessions: dict[str, list[dict]] = {}
 class MessageRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     session_id: str | None = None
+    model_id: str | None = None
 
 
 class MessageResponse(BaseModel):
     response: str
     session_id: str
     mode: str
+    model_id: str | None = None
     timestamp: str
 
 
@@ -43,6 +46,12 @@ class HealthResponse(BaseModel):
     mode: str
     sessions: int
     tm1: bool
+    llm: bool
+
+
+class ModelsResponse(BaseModel):
+    models: list[dict]
+    default: str | None
 
 
 class TM1StatusResponse(BaseModel):
@@ -54,9 +63,9 @@ class TM1StatusResponse(BaseModel):
 
 
 def _resolve_mode() -> str:
-    if _has_openai_key() and tm1_is_configured():
+    if any_llm_configured() and tm1_is_configured():
         return "ai+tm1"
-    if _has_openai_key():
+    if any_llm_configured():
         return "ai"
     return "fallback"
 
@@ -68,6 +77,15 @@ async def health():
         mode=_resolve_mode(),
         sessions=len(sessions),
         tm1=tm1_is_configured(),
+        llm=any_llm_configured(),
+    )
+
+
+@app.get("/api/models", response_model=ModelsResponse)
+async def models():
+    return ModelsResponse(
+        models=list_available_models(),
+        default=resolve_default_model_id(),
     )
 
 
@@ -111,7 +129,10 @@ async def chat(request: MessageRequest):
     sessions[session_id].append({"role": "user", "content": request.message.strip()})
 
     try:
-        response_text, mode = generate_response(sessions[session_id])
+        response_text, mode = generate_response(
+            sessions[session_id],
+            model_id=request.model_id,
+        )
     except Exception as exc:
         sessions[session_id].pop()
         raise HTTPException(status_code=500, detail=f"Erro ao gerar resposta: {exc}") from exc
@@ -125,6 +146,7 @@ async def chat(request: MessageRequest):
         response=response_text,
         session_id=session_id,
         mode=mode,
+        model_id=request.model_id or resolve_default_model_id(),
         timestamp=datetime.utcnow().isoformat() + "Z",
     )
 

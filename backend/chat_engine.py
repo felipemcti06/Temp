@@ -75,8 +75,9 @@ def _needs_tm1_tools(messages: list[dict]) -> bool:
     patterns = [
         r"\b(dados?|valores?|total|resumo|consulta|mostra|exibe|lista)\b",
         r"\b20\d{2}\b",
-        r"\b(cubo|cubos|mdx|tm1|dimensão|dimensões|rentabilidade|dre)\b",
+        r"\b(cubo|cubos|mdx|tm1|dimensão|dimensões|rentabilidade|dre|ebitda)\b",
         r"\b(financeiro|rateio|receita|despesa)\b",
+        r"\b(html|relatório|relatorio|relatório|dashboard|executivo|gráfico|grafico)\b",
     ]
     return any(re.search(p, text) for p in patterns)
 
@@ -84,6 +85,8 @@ def _needs_tm1_tools(messages: list[dict]) -> bool:
 def generate_response(
     messages: list[dict],
     model_id: str | None = None,
+    *,
+    username: str | None = None,
 ) -> tuple[str, str]:
     """Generate a chat response. Returns (response_text, mode)."""
     try:
@@ -106,6 +109,7 @@ def generate_response(
         option,
         mcp_client=mcp_client,
         force_tools=force_tools,
+        username=username,
     )
 
 

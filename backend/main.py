@@ -15,6 +15,7 @@ from auth import (
 )
 from chat_engine import any_llm_configured, generate_response
 from llm_config import list_available_models, resolve_default_model_id
+from reports import get_report
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id, tm1_is_configured
 
 app = FastAPI(
@@ -84,6 +85,14 @@ class AuthStatusResponse(BaseModel):
     auth_required: bool
     authenticated: bool = False
     username: str | None = None
+
+
+class ReportResponse(BaseModel):
+    id: str
+    title: str
+    html: str
+    created_at: str
+    expires_at: str
 
 
 def _resolve_mode() -> str:
@@ -165,7 +174,7 @@ async def tm1_status(_user: str | None = Depends(get_current_user)):
 
 
 @app.post("/api/chat", response_model=MessageResponse)
-async def chat(request: MessageRequest, _user: str | None = Depends(get_current_user)):
+async def chat(request: MessageRequest, user: str | None = Depends(get_current_user)):
     session_id = request.session_id or str(uuid.uuid4())
 
     if session_id not in sessions:
@@ -177,6 +186,7 @@ async def chat(request: MessageRequest, _user: str | None = Depends(get_current_
         response_text, mode = generate_response(
             sessions[session_id],
             model_id=request.model_id,
+            username=user,
         )
     except Exception as exc:
         sessions[session_id].pop()
@@ -200,3 +210,17 @@ async def chat(request: MessageRequest, _user: str | None = Depends(get_current_
 async def clear_session(session_id: str, _user: str | None = Depends(get_current_user)):
     sessions.pop(session_id, None)
     return {"status": "cleared", "session_id": session_id}
+
+
+@app.get("/api/reports/{report_id}", response_model=ReportResponse)
+async def get_report_endpoint(report_id: str, _user: str | None = Depends(get_current_user)):
+    report = get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Relatório não encontrado ou expirado")
+    return ReportResponse(
+        id=report.id,
+        title=report.title,
+        html=report.html,
+        created_at=report.created_at.isoformat(),
+        expires_at=report.expires_at.isoformat(),
+    )

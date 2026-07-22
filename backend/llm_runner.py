@@ -1,11 +1,13 @@
 import json
 import os
+import re
 from typing import Any
 
 from anthropic import Anthropic
 from openai import OpenAI
 
 from llm_config import ModelOption
+from report_tools import REPORT_TOOL_DEFINITIONS, execute_report_tool
 from tm1_mcp import TM1MCPClient, TM1MCPError
 from tm1_tools import OPENAI_TOOL_DEFINITIONS, execute_tm1_tool
 
@@ -17,10 +19,19 @@ cubos ou o ambiente TM1. Sempre use as ferramentas para consultar antes de respo
 
 Quando o usuário pedir dados, valores, totais ou informações de um ano (ex: 2025):
 1. Use tm1_get_cube_data com cube_name e year — ela monta o MDX automaticamente
-2. Se não souber o cubo, chame tm1_list_cubes primeiro
+2. Se não souber o cubo, chame tm1_list_cubes ou tm1_search primeiro
 3. Só use tm1_execute_mdx se precisar de MDX customizado
 
-Exemplo: tm1_get_cube_data(cube_name="RTB.100.DRE_Produto", year="2025")
+Quando o usuário pedir relatório, resumo executivo, dashboard ou HTML:
+1. PRIMEIRO consulte o TM1 e obtenha os dados reais
+2. Analise tendências, variações e destaques
+3. Chame create_html_report com title e html (tabelas, KPIs, resumo executivo)
+4. Na resposta final, informe o link retornado (ex: /relatorio/uuid) e um resumo curto
+
+Exemplo de HTML no relatório:
+<h1>Título</h1>
+<p>Resumo executivo...</p>
+<table><thead>...</thead><tbody>...</tbody></table>
 
 Nunca invente nomes de cubos, dimensões ou valores numéricos.
 
@@ -28,7 +39,8 @@ Capacidades TM1:
 - Listar cubos, dimensões e processos
 - Executar consultas MDX para obter valores de células
 - Buscar texto no modelo e nas regras
-- Ler regras de cubos e listar elementos de dimensões"""
+- Ler regras de cubos e listar elementos de dimensões
+- Publicar relatórios HTML em /relatorio/{id}"""
 
 
 MAX_TM1_ITERATIONS = int(os.getenv("TM1_MAX_ITERATIONS", "20"))
@@ -40,12 +52,16 @@ class ToolLoopContext:
         messages: list[dict],
         mcp_client: TM1MCPClient | None,
         force_tools: bool,
+        username: str | None = None,
     ):
         self.messages = messages
         self.mcp_client = mcp_client
         self.force_tools = force_tools
+        self.username = username
         self.use_tm1 = mcp_client is not None
-        self.tools = OPENAI_TOOL_DEFINITIONS if self.use_tm1 else None
+        self.tools: list[dict[str, Any]] = list(REPORT_TOOL_DEFINITIONS)
+        if self.use_tm1:
+            self.tools.extend(OPENAI_TOOL_DEFINITIONS)
 
 
 def _to_anthropic_tools(tools: list[dict]) -> list[dict]:
@@ -59,16 +75,33 @@ def _to_anthropic_tools(tools: list[dict]) -> list[dict]:
     ]
 
 
+def _execute_tool(
+    mcp_client: TM1MCPClient | None,
+    fn_name: str,
+    fn_args: dict[str, Any],
+    *,
+    username: str | None,
+) -> str:
+    if fn_name == "create_html_report":
+        return execute_report_tool(fn_args, created_by=username)
+
+    if not mcp_client:
+        return f"Ferramenta {fn_name} requer conexão TM1, que não está disponível."
+
+    return execute_tm1_tool(mcp_client, fn_name, fn_args)
+
+
 def _run_tool_calls(
-    mcp_client: TM1MCPClient,
+    mcp_client: TM1MCPClient | None,
     tool_calls: list[tuple[str, str, dict]],
+    *,
+    username: str | None,
 ) -> list[tuple[str, str]]:
-    """Returns list of (tool_call_id, result_text)."""
     results = []
     for call_id, fn_name, fn_args in tool_calls:
         try:
-            result = execute_tm1_tool(mcp_client, fn_name, fn_args)
-        except (TM1MCPError, json.JSONDecodeError, KeyError) as exc:
+            result = _execute_tool(mcp_client, fn_name, fn_args, username=username)
+        except (TM1MCPError, json.JSONDecodeError, KeyError, ValueError) as exc:
             result = f"Erro ao executar {fn_name}: {exc}"
         results.append((call_id, result))
     return results
@@ -87,7 +120,7 @@ def _openai_tool_loop(
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": api_messages,
-            "max_tokens": 1024,
+            "max_tokens": 4096,
             "temperature": temperature,
         }
         if ctx.tools:
@@ -99,7 +132,7 @@ def _openai_tool_loop(
         choice = completion.choices[0]
         message = choice.message
 
-        if choice.finish_reason == "tool_calls" and message.tool_calls and ctx.mcp_client:
+        if choice.finish_reason == "tool_calls" and message.tool_calls:
             api_messages.append(
                 {
                     "role": "assistant",
@@ -123,6 +156,7 @@ def _openai_tool_loop(
                     (tc.id, tc.function.name, json.loads(tc.function.arguments or "{}"))
                     for tc in message.tool_calls
                 ],
+                username=ctx.username,
             ):
                 api_messages.append(
                     {"role": "tool", "tool_call_id": call_id, "content": result}
@@ -135,8 +169,8 @@ def _openai_tool_loop(
         return content, f"{mode_prefix}{suffix}"
 
     return (
-        "A consulta ao TM1 exigiu muitas etapas. Tente uma pergunta mais específica com o nome do cubo.",
-        f"{mode_prefix}+tm1",
+        "A consulta exigiu muitas etapas. Tente uma pergunta mais específica.",
+        f"{mode_prefix}+tm1" if ctx.use_tm1 else mode_prefix,
     )
 
 
@@ -156,7 +190,7 @@ def _anthropic_tool_loop(
     for _ in range(MAX_TM1_ITERATIONS):
         kwargs: dict[str, Any] = {
             "model": model,
-            "max_tokens": 1024,
+            "max_tokens": 4096,
             "system": SYSTEM_PROMPT,
             "messages": anthropic_messages,
         }
@@ -167,7 +201,7 @@ def _anthropic_tool_loop(
 
         response = client.messages.create(**kwargs)
 
-        if response.stop_reason == "tool_use" and ctx.mcp_client:
+        if response.stop_reason == "tool_use":
             anthropic_messages.append({"role": "assistant", "content": response.content})
             tool_calls = [
                 (block.id, block.name, block.input)
@@ -180,7 +214,9 @@ def _anthropic_tool_loop(
                     "tool_use_id": call_id,
                     "content": result,
                 }
-                for call_id, result in _run_tool_calls(ctx.mcp_client, tool_calls)
+                for call_id, result in _run_tool_calls(
+                    ctx.mcp_client, tool_calls, username=ctx.username
+                )
             ]
             anthropic_messages.append({"role": "user", "content": tool_results})
             ctx.force_tools = False
@@ -192,9 +228,13 @@ def _anthropic_tool_loop(
         return content, f"{mode_prefix}{suffix}"
 
     return (
-        "A consulta ao TM1 exigiu muitas etapas. Tente uma pergunta mais específica com o nome do cubo.",
-        f"{mode_prefix}+tm1",
+        "A consulta exigiu muitas etapas. Tente uma pergunta mais específica.",
+        f"{mode_prefix}+tm1" if ctx.use_tm1 else mode_prefix,
     )
+
+
+def _should_use_tools(mcp_client: TM1MCPClient | None, force_tools: bool) -> bool:
+    return force_tools or mcp_client is not None
 
 
 def generate_with_model(
@@ -203,12 +243,14 @@ def generate_with_model(
     *,
     mcp_client: TM1MCPClient | None,
     force_tools: bool,
+    username: str | None = None,
 ) -> tuple[str, str]:
-    ctx = ToolLoopContext(messages, mcp_client, force_tools)
+    ctx = ToolLoopContext(messages, mcp_client, force_tools, username=username)
+    use_tools = _should_use_tools(mcp_client, force_tools)
 
     if option.provider == "openai":
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        if ctx.use_tm1:
+        if use_tools:
             return _openai_tool_loop(client, option.model, ctx, "openai")
         completion = client.chat.completions.create(
             model=option.model,
@@ -220,7 +262,7 @@ def generate_with_model(
 
     if option.provider == "anthropic":
         client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        if ctx.use_tm1:
+        if use_tools:
             return _anthropic_tool_loop(client, option.model, ctx, "anthropic")
         response = client.messages.create(
             model=option.model,

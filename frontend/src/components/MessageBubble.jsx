@@ -1,4 +1,12 @@
+import { Link } from 'react-router-dom'
 import BrandLogo from './BrandLogo'
+
+const REPORT_LINK_RE = /\/relatorio\/[0-9a-f-]{36}/gi
+
+function extractReportLinks(content) {
+  const matches = content.match(REPORT_LINK_RE) || []
+  return [...new Set(matches)]
+}
 
 export default function MessageBubble({ message }) {
   const isUser = message.role === 'user'
@@ -7,6 +15,8 @@ export default function MessageBubble({ message }) {
     minute: '2-digit',
   })
 
+  const reportLinks = !isUser ? extractReportLinks(message.content) : []
+
   return (
     <div className={`message message--${isUser ? 'user' : 'bot'}`}>
       <div className="message__avatar">
@@ -14,6 +24,15 @@ export default function MessageBubble({ message }) {
       </div>
       <div>
         <div className="message__bubble">{message.content}</div>
+        {reportLinks.length > 0 && (
+          <div className="message__actions">
+            {reportLinks.map((path) => (
+              <Link key={path} to={path} className="report-link report-link--button">
+                Abrir relatório
+              </Link>
+            ))}
+          </div>
+        )}
         <div className="message__time">{time}</div>
       </div>
     </div>

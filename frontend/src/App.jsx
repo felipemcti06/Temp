@@ -63,7 +63,12 @@ export default function App() {
     [sessionId],
   )
 
-  const modeLabel = mode === 'ai' ? 'IA ativada' : 'Modo demonstração'
+  const modeLabel =
+    mode === 'ai+tm1'
+      ? 'IA + TM1 ativados'
+      : mode === 'ai'
+        ? 'IA ativada'
+        : 'Modo demonstração'
 
   return (
     <div className="app">

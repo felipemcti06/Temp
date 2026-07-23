@@ -57,6 +57,10 @@ CHART_SAFE_CSS = """
       margin: 1.5rem auto;
       overflow: hidden;
     }
+    .chart-container--tall {
+      height: 480px;
+      max-height: 480px;
+    }
     .chart-container canvas {
       display: block;
       max-width: 100%;

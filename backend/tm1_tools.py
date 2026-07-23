@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id
-from tm1_mdx_builder import query_cube_data, query_time_series
+from tm1_mdx_builder import query_cube_data, query_time_series, query_time_series_by_product
 
 MAX_TOOL_RESULT_CHARS = 12_000
 DEFAULT_MDX_TOP = 50
@@ -163,6 +163,11 @@ OPENAI_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "measure": {
                         "type": "string",
                         "description": "Medida. Padrão: Valor",
+                    },
+                    "group_by": {
+                        "type": "string",
+                        "enum": ["produto"],
+                        "description": "Desagregação: use 'produto' para série mensal por produto.",
                     },
                 },
                 "required": ["year"],
@@ -365,16 +370,28 @@ def execute_tm1_tool(client: TM1MCPClient, tool_name: str, arguments: dict[str, 
         return _format_result(result)
 
     if tool_name == "tm1_get_time_series":
-        result = query_time_series(
-            client,
-            connection_id,
-            cube_name=arguments.get("cube_name"),
-            metric=arguments.get("metric"),
-            year=arguments.get("year", "2025"),
-            version=arguments.get("version"),
-            account=arguments.get("account"),
-            measure=arguments.get("measure"),
-        )
+        if arguments.get("group_by") == "produto":
+            result = query_time_series_by_product(
+                client,
+                connection_id,
+                cube_name=arguments.get("cube_name"),
+                metric=arguments.get("metric"),
+                year=arguments.get("year", "2025"),
+                version=arguments.get("version"),
+                account=arguments.get("account"),
+                measure=arguments.get("measure"),
+            )
+        else:
+            result = query_time_series(
+                client,
+                connection_id,
+                cube_name=arguments.get("cube_name"),
+                metric=arguments.get("metric"),
+                year=arguments.get("year", "2025"),
+                version=arguments.get("version"),
+                account=arguments.get("account"),
+                measure=arguments.get("measure"),
+            )
         return _format_result(result)
 
     mcp_tool = TOOL_TO_MCP.get(tool_name)

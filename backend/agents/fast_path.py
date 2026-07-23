@@ -7,10 +7,10 @@ import os
 from collections.abc import Callable
 
 from metrics_catalog import ReportRequest, parse_report_request
-from report_renderer import render_time_series_report
+from report_renderer import render_time_series_by_product_report, render_time_series_report
 from reports import create_report
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id
-from tm1_mdx_builder import query_time_series
+from tm1_mdx_builder import query_time_series, query_time_series_by_product
 
 logger = logging.getLogger(__name__)
 
@@ -56,23 +56,36 @@ def try_fast_report_path(
     _emit(status_cb, "Interpretando pedido de relatório...")
 
     logger.info(
-        "Fast path: metric=%s year=%s user=%s",
+        "Fast path: metric=%s year=%s group_by=%s user=%s",
         request.metric_key,
         request.year,
+        request.group_by,
         username,
     )
 
     try:
         connection_id = get_default_connection_id()
-        _emit(status_cb, f"Consultando TM1 ({request.metric_label} · {request.year})...")
-        payload = query_time_series(
-            mcp_client,
-            connection_id,
-            metric=request.metric_key,
-            year=request.year,
-            cube_name=request.cube,
-            version=request.version,
-        )
+        if request.group_by == "produto":
+            _emit(status_cb, f"Consultando TM1 por produto ({request.metric_label} · {request.year})...")
+            payload = query_time_series_by_product(
+                mcp_client,
+                connection_id,
+                metric=request.metric_key,
+                year=request.year,
+                cube_name=request.cube,
+                version=request.version,
+                prompt_signature=request.prompt_signature,
+            )
+        else:
+            _emit(status_cb, f"Consultando TM1 ({request.metric_label} · {request.year})...")
+            payload = query_time_series(
+                mcp_client,
+                connection_id,
+                metric=request.metric_key,
+                year=request.year,
+                cube_name=request.cube,
+                version=request.version,
+            )
         if payload.get("_cached"):
             _emit(status_cb, "Dados recuperados do cache TM1 (até 3 min).")
     except TM1MCPError as exc:
@@ -82,14 +95,17 @@ def try_fast_report_path(
             "fast-path-error",
         )
 
-    if not payload.get("series"):
+    if not payload.get("series") and not payload.get("series_groups"):
         return (
             f"Consulta de {request.metric_label} em {request.year} não retornou dados.",
             "fast-path-empty",
         )
 
     _emit(status_cb, "Montando relatório HTML...")
-    title, html = render_time_series_report(request, payload)
+    if request.group_by == "produto":
+        title, html = render_time_series_by_product_report(request, payload)
+    else:
+        title, html = render_time_series_report(request, payload)
     _emit(status_cb, "Publicando relatório...")
     report = create_report(title, html, created_by=username)
 
@@ -98,4 +114,5 @@ def try_fast_report_path(
         f"Resumo: {payload.get('summary', 'Série mensal obtida.')}\n\n"
         f"Abrir relatório: {report['url']}"
     )
-    return text, "fast-path"
+    mode = "fast-path-by-product" if request.group_by == "produto" else "fast-path"
+    return text, mode

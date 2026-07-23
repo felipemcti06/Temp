@@ -26,6 +26,7 @@ MONTH_LABELS = {
 }
 
 _CATALOG_PATH = Path(__file__).with_name("metrics_catalog.json")
+_PRODUCTS_CATALOG_PATH = Path(__file__).with_name("products_catalog.json")
 
 
 def _load_catalog() -> dict[str, Any]:
@@ -73,7 +74,13 @@ def _find_dim(dim_names: list[str], *hints: str) -> str | None:
 def _parse_element_items(raw: Any) -> list[dict[str, Any]]:
     """Normaliza resposta de list_elements (lista, dict, NDJSON ou texto)."""
     if isinstance(raw, list):
-        return [i for i in raw if isinstance(i, dict)]
+        items: list[dict[str, Any]] = []
+        for entry in raw:
+            if isinstance(entry, dict):
+                items.append(entry)
+            elif isinstance(entry, str):
+                items.extend(_parse_element_items(entry))
+        return items
 
     if isinstance(raw, dict):
         return [raw]
@@ -121,7 +128,27 @@ def _list_element_names(client: TM1MCPClient, connection_id: str, dimension: str
     return [i.get("Name", "") for i in _list_element_items(client, connection_id, dimension, top) if i.get("Name")]
 
 
-def _list_product_leaves(client: TM1MCPClient, connection_id: str, produto_dim: str, *, limit: int = 12) -> list[str]:
+def _load_products_catalog() -> dict[str, Any]:
+    if not _PRODUCTS_CATALOG_PATH.exists():
+        return {}
+    return json.loads(_PRODUCTS_CATALOG_PATH.read_text(encoding="utf-8"))
+
+
+def _fallback_product_leaves(cube_name: str, produto_dim: str, *, limit: int = 12) -> list[str]:
+    catalog = _load_products_catalog()
+    cube_cfg = catalog.get(cube_name) or {}
+    names = cube_cfg.get(produto_dim) or cube_cfg.get("ALL.D.Produto") or []
+    return [n for n in names if n][:limit]
+
+
+def _list_product_leaves(
+    client: TM1MCPClient,
+    connection_id: str,
+    produto_dim: str,
+    *,
+    cube_name: str | None = None,
+    limit: int = 12,
+) -> list[str]:
     items = _list_element_items(client, connection_id, produto_dim, top=100)
     excluded = {"Total_Produto", "Nao_Alocado_Produto"}
     leaves: list[str] = []
@@ -136,7 +163,6 @@ def _list_product_leaves(client: TM1MCPClient, connection_id: str, produto_dim: 
             continue
         if elem_type == "consolidated" or name.lower().startswith("total"):
             continue
-        # Fallback quando Type não vem na resposta MCP
         if item.get("Level") == 0:
             leaves.append(name)
 
@@ -149,7 +175,15 @@ def _list_product_leaves(client: TM1MCPClient, connection_id: str, produto_dim: 
                 continue
             leaves.append(name)
 
-    return leaves[:limit]
+    if leaves:
+        return leaves[:limit]
+
+    if cube_name:
+        fallback = _fallback_product_leaves(cube_name, produto_dim, limit=limit)
+        if fallback:
+            return fallback
+
+    return []
 
 
 def _first_measure_element(client: TM1MCPClient, connection_id: str, measure_dim: str) -> str:
@@ -517,9 +551,14 @@ def query_time_series_by_product(
     if not all([measure_dim, ano_dim, mes_dim, conta_dim, produto_dim]):
         raise TM1MCPError(f"Cubo {cube_name} não suporta consulta por produto. Dimensões: {names}")
 
-    products = _list_product_leaves(client, connection_id, produto_dim, limit=12)
+    products = _list_product_leaves(
+        client, connection_id, produto_dim, cube_name=cube_name, limit=12
+    )
     if not products:
-        raise TM1MCPError(f"Nenhum produto folha encontrado em {produto_dim}")
+        raise TM1MCPError(
+            f"Nenhum produto folha encontrado em {produto_dim}. "
+            f"list_elements retornou {len(_list_element_items(client, connection_id, produto_dim, top=100))} item(ns)."
+        )
 
     measure_elem = measure or _first_measure_element(client, connection_id, measure_dim)
     account_elem = _resolve_account_element(client, connection_id, conta_dim, account)

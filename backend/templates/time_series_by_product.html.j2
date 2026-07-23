@@ -17,28 +17,30 @@
   <p>{{ summary }}</p>
 </section>
 
-<section>
+<section class="report-table-section">
   <h2>Tabela por produto</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Produto</th>
-        {% for month in month_labels %}
-        <th>{{ month }}</th>
+  <div class="table-scroll">
+    <table class="table-wide">
+      <thead>
+        <tr>
+          <th>Produto</th>
+          {% for month in month_labels %}
+          <th class="month">{{ month }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for group in series_groups %}
+        <tr>
+          <td>{{ group.name }}</td>
+          {% for row in group.series %}
+          <td class="num">{{ row.formatted or row.value or "—" }}</td>
+          {% endfor %}
+        </tr>
         {% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for group in series_groups %}
-      <tr>
-        <td>{{ group.name }}</td>
-        {% for row in group.series %}
-        <td>{{ row.formatted or row.value or "—" }}</td>
-        {% endfor %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <section>

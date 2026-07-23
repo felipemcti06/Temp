@@ -9,7 +9,7 @@ const SUGGESTIONS = [
   'Preciso de ajuda',
 ]
 
-export default function ChatWindow({ messages, onSend, loading, statusMessage = '' }) {
+export default function ChatWindow({ messages, onSend, loading, statusMessage = '', cacheStatus = '' }) {
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -62,6 +62,10 @@ export default function ChatWindow({ messages, onSend, loading, statusMessage = 
               </div>
             </div>
           </div>
+        )}
+
+        {!loading && cacheStatus && (
+          <div className="cache-status-banner">{cacheStatus}</div>
         )}
 
         <div ref={bottomRef} />

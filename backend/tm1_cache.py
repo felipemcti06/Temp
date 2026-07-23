@@ -45,7 +45,7 @@ def normalize_query_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Chave canônica estável — não depende do texto livre do prompt."""
     normalized = {
         "connection_id": payload.get("connection_id"),
-        "cube_name": payload.get("cube_name"),
+        "cube_name": payload.get("cube_name") or payload.get("cube"),
         "metric": (payload.get("metric") or "").strip().lower() or None,
         "year": str(payload.get("year") or ""),
         "version": payload.get("version") or "REAL",
@@ -54,6 +54,27 @@ def normalize_query_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "group_by": payload.get("group_by"),
     }
     return {k: v for k, v in normalized.items() if v is not None}
+
+
+def build_report_cache_payload(
+    *,
+    connection_id: str,
+    metric_key: str,
+    year: str,
+    cube: str,
+    version: str,
+    group_by: str | None,
+) -> dict[str, Any]:
+    return normalize_query_payload(
+        {
+            "connection_id": connection_id,
+            "cube_name": cube,
+            "metric": metric_key,
+            "year": year,
+            "version": version,
+            "group_by": group_by,
+        }
+    )
 
 
 def cache_key(namespace: str, payload: dict[str, Any]) -> str:

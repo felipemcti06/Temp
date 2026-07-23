@@ -3,6 +3,7 @@ import ChatWindow from '../components/ChatWindow'
 import BrandLogo from '../components/BrandLogo'
 import ModelSelector, { getSavedModelId, saveModelId } from '../components/ModelSelector'
 import { apiFetch, streamChat } from '../api'
+import { getReportCache, isCacheHitResponse, setReportCache } from '../reportCache'
 import { useAuth } from '../hooks/useAuth'
 import '../App.css'
 
@@ -34,6 +35,7 @@ export default function ChatApp() {
   const [statusMessage, setStatusMessage] = useState('')
   const [mode, setMode] = useState('fallback')
   const [cacheHit, setCacheHit] = useState(false)
+  const [lastCacheStatus, setLastCacheStatus] = useState('')
   const [models, setModels] = useState([])
   const [modelId, setModelId] = useState('')
 
@@ -82,6 +84,26 @@ export default function ChatApp() {
       setLoading(true)
       setStatusMessage('Analisando pedido...')
       setCacheHit(false)
+      setLastCacheStatus('')
+
+      const cachedLocal = getReportCache(text)
+      if (cachedLocal) {
+        setSessionId(cachedLocal.session_id)
+        setMode(cachedLocal.mode)
+        setCacheHit(true)
+        setLastCacheStatus('Resposta servida do cache local (até 3 min).')
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: cachedLocal.response,
+            timestamp: cachedLocal.timestamp || new Date().toISOString(),
+            cacheHit: true,
+          },
+        ])
+        setLoading(false)
+        return
+      }
 
       try {
         const data = await streamChat(
@@ -97,7 +119,12 @@ export default function ChatApp() {
 
         setSessionId(data.session_id)
         setMode(data.mode)
-        setCacheHit(Boolean(data.cache_hit))
+        const hit = isCacheHitResponse(data)
+        setCacheHit(hit)
+        if (hit) {
+          setLastCacheStatus('Dados recuperados do cache TM1 (até 3 min).')
+          setReportCache(text, data)
+        }
 
         setMessages((prev) => [
           ...prev,
@@ -105,7 +132,7 @@ export default function ChatApp() {
             role: 'assistant',
             content: data.response,
             timestamp: data.timestamp,
-            cacheHit: Boolean(data.cache_hit),
+            cacheHit: hit,
           },
         ])
       } catch (err) {
@@ -163,10 +190,12 @@ export default function ChatApp() {
         onSend={sendMessage}
         loading={loading}
         statusMessage={statusMessage}
+        cacheStatus={lastCacheStatus}
       />
 
       <footer className="app-footer">
-        ChatBot v1.6.1 · Cache TM1 SQLite
+        ChatBot v1.6.2 · Cache local + TM1
+        {cacheHit ? ' · última resposta em cache' : ''}
       </footer>
     </div>
   )

@@ -1,5 +1,6 @@
 import os
 import re
+from collections.abc import Callable
 
 from agents.fast_path import try_fast_report_path
 from agents.orchestrator import run_report_pipeline
@@ -107,8 +108,14 @@ def generate_response(
     model_id: str | None = None,
     *,
     username: str | None = None,
+    status_cb: Callable[[str], None] | None = None,
 ) -> tuple[str, str]:
     """Generate a chat response. Returns (response_text, mode)."""
+
+    def emit(message: str) -> None:
+        if status_cb:
+            status_cb(message)
+
     try:
         option = resolve_model_id(model_id)
     except ValueError as exc:
@@ -124,12 +131,15 @@ def generate_response(
     mcp_client = TM1MCPClient.from_env() if tm1_is_configured() else None
     wants_report = _needs_report(messages)
 
+    emit("Analisando pedido...")
+
     # Fase 2: fast path determinístico (glossário + Jinja2, sem LLM)
     if wants_report and mcp_client:
         fast_result = try_fast_report_path(
             messages,
             mcp_client,
             username=username,
+            status_cb=status_cb,
         )
         if fast_result:
             return fast_result
@@ -142,10 +152,12 @@ def generate_response(
                 option,
                 mcp_client=mcp_client,
                 username=username,
+                status_cb=status_cb,
             )
         except Exception as exc:
             # Fallback para o fluxo monolítico se o pipeline falhar
             err_note = f"(Pipeline de agentes falhou: {exc}. Usando fluxo padrão.)\n\n"
+            emit("Usando fluxo alternativo...")
             force_tools = True
             text, mode = generate_with_model(
                 messages,
@@ -158,6 +170,10 @@ def generate_response(
             return err_note + text, f"{mode}+fallback"
 
     force_tools = bool(mcp_client and (_needs_tm1_tools(messages) or wants_report))
+    if force_tools:
+        emit("Consultando TM1 e gerando resposta...")
+    else:
+        emit("Gerando resposta...")
 
     return generate_with_model(
         messages,

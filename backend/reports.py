@@ -12,6 +12,42 @@ REPORT_TTL_HOURS = int(os.getenv("REPORT_TTL_HOURS", "24"))
 MAX_HTML_CHARS = 500_000
 
 CHART_SAFE_CSS = """
+    .report-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1.25rem 1.5rem;
+      margin: -2rem -1.5rem 2rem;
+      background: linear-gradient(135deg, #1a1a2e 0%, #2a1f4d 100%);
+      color: #e8e8f0;
+      border-radius: 0 0 12px 12px;
+    }
+    .report-logo {
+      width: 44px;
+      height: 44px;
+      object-fit: contain;
+      border-radius: 8px;
+      background: #000;
+      padding: 4px;
+    }
+    .report-brand {
+      font-size: 0.8rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #9898b0;
+      margin: 0 0 0.25rem;
+    }
+    .report-meta {
+      margin: 0;
+      font-size: 0.85rem;
+      color: #c7c7dc;
+    }
+    .kpi-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 1rem 0 1.5rem;
+    }
     .chart-container {
       position: relative;
       height: 420px;
@@ -100,7 +136,7 @@ def wrap_html_document(title: str, body: str) -> str:
       text-align: left;
       border-bottom: 1px solid #e5e7eb;
     }}
-    th {{ background: #111827; color: #fff; }}
+    th {{ background: #1a1a2e; color: #fff; }}
     .kpi {{
       display: inline-block;
       background: #fff;
@@ -109,7 +145,7 @@ def wrap_html_document(title: str, body: str) -> str:
       margin: 0.5rem 0.5rem 0.5rem 0;
       box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }}
-    .kpi strong {{ display: block; font-size: 1.4rem; color: #4f46e5; }}
+    .kpi strong {{ display: block; font-size: 1.4rem; color: #6c63ff; }}
     {CHART_SAFE_CSS}
   </style>
 </head>

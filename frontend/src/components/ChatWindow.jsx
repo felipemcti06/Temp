@@ -9,7 +9,7 @@ const SUGGESTIONS = [
   'Preciso de ajuda',
 ]
 
-export default function ChatWindow({ messages, onSend, loading }) {
+export default function ChatWindow({ messages, onSend, loading, statusMessage = '' }) {
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -53,10 +53,13 @@ export default function ChatWindow({ messages, onSend, loading }) {
             <div className="message__avatar">
               <BrandLogo className="brand-logo--message" />
             </div>
-            <div className="typing">
-              <span />
-              <span />
-              <span />
+            <div className="typing-block">
+              {statusMessage && <p className="typing-status">{statusMessage}</p>}
+              <div className="typing">
+                <span />
+                <span />
+                <span />
+              </div>
             </div>
           </div>
         )}

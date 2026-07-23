@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from tm1_mcp import TM1MCPClient, TM1MCPError
+from tm1_cache import get_cached, set_cached
 
 MONTH_LABELS = {
     "01": "Jan",
@@ -262,6 +263,19 @@ def query_time_series(
     if not account:
         raise TM1MCPError("Informe account ou metric (ex: EBITDA / EBITDA Gerencial)")
 
+    cache_payload = {
+        "connection_id": connection_id,
+        "cube_name": cube_name,
+        "metric": metric,
+        "year": year,
+        "version": version,
+        "account": account,
+        "measure": measure,
+    }
+    cached = get_cached("time_series", cache_payload)
+    if cached:
+        return cached
+
     summary = client.call_tool(
         "cube_summary",
         {"connection_id": connection_id, "cube_name": cube_name},
@@ -358,7 +372,7 @@ def query_time_series(
         else:
             summary_text = f"{metric_name} em {year}: série mensal obtida."
 
-    return {
+    result = {
         "metric": metric_name,
         "account": account_elem,
         "cube": cube_name,
@@ -370,3 +384,5 @@ def query_time_series(
         "mdx": mdx,
         "sources": [{"tool": "tm1_get_time_series", "mdx": mdx}],
     }
+    set_cached("time_series", cache_payload, result)
+    return result

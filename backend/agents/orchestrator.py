@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 
 from agents.data_agent import run_data_agent
 from agents.report_agent import run_report_agent
@@ -11,6 +12,13 @@ from llm_config import ModelOption, is_model_available, resolve_model_id
 from tm1_mcp import TM1MCPClient
 
 logger = logging.getLogger(__name__)
+
+StatusCallback = Callable[[str], None] | None
+
+
+def _emit(status_cb: StatusCallback, message: str) -> None:
+    if status_cb:
+        status_cb(message)
 
 DEFAULT_DATA_AGENT_MODEL = "anthropic/claude-sonnet-4-6"
 FALLBACK_DATA_AGENT_MODELS = [
@@ -54,6 +62,7 @@ def run_report_pipeline(
     *,
     mcp_client: TM1MCPClient,
     username: str | None = None,
+    status_cb: StatusCallback = None,
 ) -> tuple[str, str]:
     """
     Pipeline em 2 fases:
@@ -77,6 +86,7 @@ def run_report_pipeline(
         username,
     )
 
+    _emit(status_cb, "Consultando TM1 (agente de dados)...")
     data_payload, data_mode = run_data_agent(
         messages,
         data_model,
@@ -84,6 +94,7 @@ def run_report_pipeline(
         username=username,
     )
 
+    _emit(status_cb, "Gerando relatório HTML (agente de relatório)...")
     text, report_mode = run_report_agent(
         messages,
         data_payload,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,10 +12,18 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from metrics_catalog import ReportRequest
 
 _TEMPLATES_DIR = Path(__file__).with_name("templates")
+_LOGO_PATH = Path(__file__).with_name("assets") / "cti-logo.png"
 _env = Environment(
     loader=FileSystemLoader(str(_TEMPLATES_DIR)),
     autoescape=select_autoescape(["html", "xml"]),
 )
+
+
+def _logo_data_uri() -> str | None:
+    if not _LOGO_PATH.exists():
+        return None
+    encoded = base64.b64encode(_LOGO_PATH.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def _format_change(first: float, last: float, *, is_percent: bool) -> str:
@@ -104,5 +113,7 @@ def render_time_series_report(
         chart_labels=chart_labels,
         chart_values=chart_values,
         generated_at=datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC"),
+        logo_src=_logo_data_uri(),
+        brand_name="CTI",
     )
     return title, html

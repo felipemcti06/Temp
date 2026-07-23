@@ -501,7 +501,6 @@ def query_time_series_by_product(
     version: str | None = None,
     account: str | None = None,
     measure: str | None = None,
-    prompt_signature: str = "",
 ) -> dict[str, Any]:
     """Série mensal da métrica desagregada por produto (um dataset por produto)."""
     catalog = resolve_metric_catalog(metric)
@@ -526,7 +525,6 @@ def query_time_series_by_product(
         "account": account,
         "measure": measure,
         "group_by": "produto",
-        "prompt_signature": prompt_signature,
     }
     cached = get_cached("time_series_by_product", cache_payload)
     if cached:

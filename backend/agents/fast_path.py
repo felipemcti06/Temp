@@ -75,7 +75,6 @@ def try_fast_report_path(
                 year=request.year,
                 cube_name=request.cube,
                 version=request.version,
-                prompt_signature=request.prompt_signature,
             )
         else:
             _emit(status_cb, f"Consultando TM1 ({request.metric_label} · {request.year})...")
@@ -113,8 +112,14 @@ def try_fast_report_path(
     _emit(status_cb, "Publicando relatório...")
     report = create_report(title, html, created_by=username)
 
+    cache_line = (
+        "⚡ **Cache TM1** — dados reutilizados (válido por até 3 min).\n\n"
+        if meta.get("cache_hit")
+        else ""
+    )
     text = (
         f"Relatório **{title}** publicado via fast path (sem LLM).\n\n"
+        f"{cache_line}"
         f"Resumo: {payload.get('summary', 'Série mensal obtida.')}\n\n"
         f"Abrir relatório: {report['url']}"
     )

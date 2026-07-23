@@ -23,7 +23,12 @@ export default function MessageBubble({ message }) {
         {isUser ? '👤' : <BrandLogo className="brand-logo--message" />}
       </div>
       <div>
-        <div className="message__bubble">{message.content}</div>
+        <div className="message__bubble">
+          {!isUser && message.cacheHit && (
+            <span className="message__cache-badge">Cache TM1</span>
+          )}
+          {message.content}
+        </div>
         {reportLinks.length > 0 && (
           <div className="message__actions">
             {reportLinks.map((path) => (

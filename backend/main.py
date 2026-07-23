@@ -60,6 +60,8 @@ class HealthResponse(BaseModel):
     sessions: int
     tm1: bool
     llm: bool
+    cache_enabled: bool = False
+    cache_hit_rate: float | None = None
 
 
 class ModelsResponse(BaseModel):
@@ -69,8 +71,12 @@ class ModelsResponse(BaseModel):
 
 class TM1CacheStatsResponse(BaseModel):
     enabled: bool
+    sqlite: bool
+    db_path: str | None = None
     ttl_seconds: int
     entries: int
+    memory_entries: int
+    sqlite_entries: int
     hits: int
     misses: int
     sets: int
@@ -121,12 +127,15 @@ def _resolve_mode() -> str:
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health():
+    stats = cache_stats()
     return HealthResponse(
         status="ok",
         mode=_resolve_mode(),
         sessions=len(sessions),
         tm1=tm1_is_configured(),
         llm=any_llm_configured(),
+        cache_enabled=stats["enabled"],
+        cache_hit_rate=stats["hit_rate"] if stats["hits"] + stats["misses"] > 0 else None,
     )
 
 

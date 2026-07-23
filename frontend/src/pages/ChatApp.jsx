@@ -105,6 +105,7 @@ export default function ChatApp() {
             role: 'assistant',
             content: data.response,
             timestamp: data.timestamp,
+            cacheHit: Boolean(data.cache_hit),
           },
         ])
       } catch (err) {
@@ -165,7 +166,7 @@ export default function ChatApp() {
       />
 
       <footer className="app-footer">
-        ChatBot v1.6 · SSE keep-alive + Cache TM1 visível
+        ChatBot v1.6.1 · Cache TM1 SQLite
       </footer>
     </div>
   )

@@ -17,10 +17,10 @@ CHART_SAFE_CSS = """
       align-items: center;
       gap: 1rem;
       padding: 1.25rem 1.5rem;
-      margin: -2rem -1.5rem 2rem;
+      margin: 0 0 2rem;
       background: linear-gradient(135deg, #1a1a2e 0%, #2a1f4d 100%);
       color: #e8e8f0;
-      border-radius: 0 0 12px 12px;
+      border-radius: 12px;
     }
     .report-logo {
       width: 44px;
@@ -74,7 +74,67 @@ CHART_SAFE_CSS = """
       width: 100% !important;
     }
     body {
-      overflow-x: hidden;
+      overflow-x: auto;
+    }
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      margin: 1rem 0 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      background: #fff;
+      -webkit-overflow-scrolling: touch;
+    }
+    .report-table-section {
+      width: 100%;
+      max-width: 100%;
+    }
+    .table-wide {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      margin: 0;
+      background: #fff;
+      overflow: visible;
+      border-radius: 0;
+      box-shadow: none;
+    }
+    .table-wide th,
+    .table-wide td {
+      padding: 0.65rem 0.85rem;
+      border-bottom: 1px solid #e5e7eb;
+      white-space: nowrap;
+    }
+    .table-wide th {
+      background: #1a1a2e;
+      color: #fff;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .table-wide td:first-child,
+    .table-wide th:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      min-width: 220px;
+      max-width: 280px;
+      white-space: normal;
+      text-align: left;
+      background: #fff;
+      box-shadow: 2px 0 4px rgba(0,0,0,0.04);
+    }
+    .table-wide th:first-child {
+      background: #1a1a2e;
+      z-index: 3;
+    }
+    .table-wide td.num,
+    .table-wide th.month {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    section {
+      margin-bottom: 2rem;
     }
 """
 
@@ -120,10 +180,12 @@ def wrap_html_document(title: str, body: str) -> str:
       font-family: Inter, system-ui, -apple-system, sans-serif;
       line-height: 1.6;
       color: #1a1a2e;
-      max-width: 960px;
+      width: 100%;
+      max-width: 1200px;
       margin: 0 auto;
-      padding: 2rem 1.5rem;
+      padding: 1.5rem;
       background: #f8f9fc;
+      box-sizing: border-box;
     }}
     h1, h2, h3 {{ color: #111827; }}
     table {{

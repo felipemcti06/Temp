@@ -181,12 +181,38 @@ class TM1MCPClient:
                     parts.append(item.get("text", ""))
             if parts:
                 combined = "\n".join(parts)
-                try:
-                    return json.loads(combined)
-                except json.JSONDecodeError:
-                    return combined
+                parsed = self._parse_tool_payload(combined)
+                if parsed is not None:
+                    return parsed
+                return combined
 
         return result
+
+    @staticmethod
+    def _parse_tool_payload(text: str) -> Any | None:
+        text = text.strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        items: list[Any] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                items.append(json.loads(line))
+            except json.JSONDecodeError:
+                return None
+
+        if len(items) > 1:
+            return items
+        if len(items) == 1:
+            return items[0]
+        return None
 
 
 def get_default_connection_id() -> str | None:

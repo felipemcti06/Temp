@@ -70,16 +70,51 @@ def _find_dim(dim_names: list[str], *hints: str) -> str | None:
     return None
 
 
+def _parse_element_items(raw: Any) -> list[dict[str, Any]]:
+    """Normaliza resposta de list_elements (lista, dict, NDJSON ou texto)."""
+    if isinstance(raw, list):
+        return [i for i in raw if isinstance(i, dict)]
+
+    if isinstance(raw, dict):
+        return [raw]
+
+    if not isinstance(raw, str):
+        return []
+
+    text = raw.strip()
+    if not text:
+        return []
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, list):
+        return [i for i in parsed if isinstance(i, dict)]
+    if isinstance(parsed, dict):
+        return [parsed]
+
+    items: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            items.append(obj)
+    return items
+
+
 def _list_element_items(client: TM1MCPClient, connection_id: str, dimension: str, top: int = 200) -> list[dict]:
     elements = client.call_tool(
         "list_elements",
         {"connection_id": connection_id, "dimension_name": dimension, "top": top},
     )
-    if isinstance(elements, list):
-        return [i for i in elements if isinstance(i, dict)]
-    if isinstance(elements, dict):
-        return [elements]
-    return []
+    return _parse_element_items(elements)
 
 
 def _list_element_names(client: TM1MCPClient, connection_id: str, dimension: str, top: int = 200) -> list[str]:
@@ -88,13 +123,32 @@ def _list_element_names(client: TM1MCPClient, connection_id: str, dimension: str
 
 def _list_product_leaves(client: TM1MCPClient, connection_id: str, produto_dim: str, *, limit: int = 12) -> list[str]:
     items = _list_element_items(client, connection_id, produto_dim, top=100)
+    excluded = {"Total_Produto", "Nao_Alocado_Produto"}
     leaves: list[str] = []
+
     for item in items:
         name = item.get("Name", "")
-        if not name or name in {"Total_Produto", "Nao_Alocado_Produto"}:
+        if not name or name in excluded:
             continue
-        if item.get("Type") == "Numeric":
+        elem_type = (item.get("Type") or "").lower()
+        if elem_type == "numeric":
             leaves.append(name)
+            continue
+        if elem_type == "consolidated" or name.lower().startswith("total"):
+            continue
+        # Fallback quando Type não vem na resposta MCP
+        if item.get("Level") == 0:
+            leaves.append(name)
+
+    if not leaves:
+        for item in items:
+            name = item.get("Name", "")
+            if not name or name in excluded:
+                continue
+            if name.lower().startswith("total"):
+                continue
+            leaves.append(name)
+
     return leaves[:limit]
 
 

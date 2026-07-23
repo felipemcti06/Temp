@@ -70,18 +70,32 @@ def _find_dim(dim_names: list[str], *hints: str) -> str | None:
     return None
 
 
-def _list_element_names(client: TM1MCPClient, connection_id: str, dimension: str, top: int = 200) -> list[str]:
+def _list_element_items(client: TM1MCPClient, connection_id: str, dimension: str, top: int = 200) -> list[dict]:
     elements = client.call_tool(
         "list_elements",
         {"connection_id": connection_id, "dimension_name": dimension, "top": top},
     )
     if isinstance(elements, list):
-        items = elements
-    elif isinstance(elements, dict):
-        items = [elements]
-    else:
-        items = []
-    return [i.get("Name", "") for i in items if isinstance(i, dict) and i.get("Name")]
+        return [i for i in elements if isinstance(i, dict)]
+    if isinstance(elements, dict):
+        return [elements]
+    return []
+
+
+def _list_element_names(client: TM1MCPClient, connection_id: str, dimension: str, top: int = 200) -> list[str]:
+    return [i.get("Name", "") for i in _list_element_items(client, connection_id, dimension, top) if i.get("Name")]
+
+
+def _list_product_leaves(client: TM1MCPClient, connection_id: str, produto_dim: str, *, limit: int = 12) -> list[str]:
+    items = _list_element_items(client, connection_id, produto_dim, top=100)
+    leaves: list[str] = []
+    for item in items:
+        name = item.get("Name", "")
+        if not name or name in {"Total_Produto", "Nao_Alocado_Produto"}:
+            continue
+        if item.get("Type") == "Numeric":
+            leaves.append(name)
+    return leaves[:limit]
 
 
 def _first_measure_element(client: TM1MCPClient, connection_id: str, measure_dim: str) -> str:
@@ -271,6 +285,7 @@ def query_time_series(
         "version": version,
         "account": account,
         "measure": measure,
+        "group_by": None,
     }
     cached = get_cached("time_series", cache_payload)
     if cached:
@@ -385,4 +400,140 @@ def query_time_series(
         "sources": [{"tool": "tm1_get_time_series", "mdx": mdx}],
     }
     set_cached("time_series", cache_payload, result)
+    return result
+
+
+def query_time_series_by_product(
+    client: TM1MCPClient,
+    connection_id: str,
+    *,
+    cube_name: str | None = None,
+    metric: str | None = None,
+    year: str = "2025",
+    version: str | None = None,
+    account: str | None = None,
+    measure: str | None = None,
+    prompt_signature: str = "",
+) -> dict[str, Any]:
+    """Série mensal da métrica desagregada por produto (um dataset por produto)."""
+    catalog = resolve_metric_catalog(metric)
+    if catalog:
+        cube_name = cube_name or catalog.get("cube")
+        account = account or catalog.get("account")
+        version = version or catalog.get("version")
+        measure = measure or catalog.get("measure")
+        metric_name = catalog.get("name") or metric
+    else:
+        metric_name = metric or account or "métrica"
+
+    if not cube_name or not account:
+        raise TM1MCPError("Informe metric/account e cube_name para consulta por produto")
+
+    cache_payload = {
+        "connection_id": connection_id,
+        "cube_name": cube_name,
+        "metric": metric,
+        "year": year,
+        "version": version,
+        "account": account,
+        "measure": measure,
+        "group_by": "produto",
+        "prompt_signature": prompt_signature,
+    }
+    cached = get_cached("time_series_by_product", cache_payload)
+    if cached:
+        return cached
+
+    summary = client.call_tool(
+        "cube_summary",
+        {"connection_id": connection_id, "cube_name": cube_name},
+    )
+    if not isinstance(summary, dict):
+        raise TM1MCPError(f"Não foi possível obter estrutura do cubo {cube_name}")
+
+    names = _dim_names(summary)
+    measure_dim = _find_measure_dim(names, cube_name)
+    ano_dim = _find_dim(names, "Ano", "Year")
+    mes_dim = _find_dim(names, "Mes", "Month")
+    versao_dim = _find_dim(names, "Versao", "Version", "Cenário", "Cenario")
+    conta_dim = _find_dim(names, "Conta", "Account", "Gerencial")
+    filial_dim = _find_dim(names, "Filial", "Empresa", "Entity", "Org")
+    produto_dim = _find_dim(names, "Produto", "Product")
+
+    if not all([measure_dim, ano_dim, mes_dim, conta_dim, produto_dim]):
+        raise TM1MCPError(f"Cubo {cube_name} não suporta consulta por produto. Dimensões: {names}")
+
+    products = _list_product_leaves(client, connection_id, produto_dim, limit=12)
+    if not products:
+        raise TM1MCPError(f"Nenhum produto folha encontrado em {produto_dim}")
+
+    measure_elem = measure or _first_measure_element(client, connection_id, measure_dim)
+    account_elem = _resolve_account_element(client, connection_id, conta_dim, account)
+    version_elem = version or "REAL"
+
+    where_parts = [
+        f"[{conta_dim}].[{account_elem}]",
+        f"[{ano_dim}].[{year}]",
+    ]
+    if versao_dim:
+        where_parts.append(f"[{versao_dim}].[{version_elem}]")
+    if filial_dim and catalog and catalog.get("filial"):
+        where_parts.append(f"[{filial_dim}].[{catalog['filial']}]")
+
+    month_set = ",".join(f"[{mes_dim}].[{m}]" for m in MONTH_LABELS)
+    product_set = ",".join(f"[{produto_dim}].[{p}]" for p in products)
+    mdx = (
+        f"SELECT {{[{measure_dim}].[{measure_elem}]}} ON 0, "
+        f"{{{month_set}}} ON 1, "
+        f"{{{product_set}}} ON 2 "
+        f"FROM [{cube_name}] "
+        f"WHERE ({','.join(where_parts)})"
+    )
+
+    raw = client.call_tool(
+        "execute_mdx",
+        {"connection_id": connection_id, "mdx": mdx, "top": len(products) * 12 + 5, "skip": 0},
+    )
+    if not isinstance(raw, dict):
+        raise TM1MCPError(f"Resposta MDX inválida: {raw}")
+
+    cells = raw.get("cells") or []
+    n_months = len(MONTH_LABELS)
+    series_groups: list[dict[str, Any]] = []
+    for product_idx, product_name in enumerate(products):
+        series = []
+        for month_idx, month_code in enumerate(MONTH_LABELS):
+            ordinal = product_idx * n_months + month_idx
+            cell = cells[ordinal] if ordinal < len(cells) else {}
+            value = cell.get("Value") if isinstance(cell, dict) else None
+            series.append(
+                {
+                    "label": MONTH_LABELS[month_code],
+                    "month": month_code,
+                    "value": value,
+                    "formatted": cell.get("FormattedValue") if isinstance(cell, dict) else None,
+                }
+            )
+        series_groups.append({"name": product_name, "series": series})
+
+    summary_text = (
+        f"{metric_name} em {year} por produto: {len(products)} produtos, "
+        f"série mensal Jan–Dez (versão {version_elem})."
+    )
+
+    result = {
+        "metric": metric_name,
+        "account": account_elem,
+        "cube": cube_name,
+        "period": year,
+        "version": version_elem,
+        "granularity": "monthly",
+        "group_by": "produto",
+        "products": products,
+        "series_groups": series_groups,
+        "summary": summary_text,
+        "mdx": mdx,
+        "sources": [{"tool": "query_time_series_by_product", "mdx": mdx}],
+    }
+    set_cached("time_series_by_product", cache_payload, result)
     return result

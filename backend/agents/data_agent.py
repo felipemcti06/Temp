@@ -19,7 +19,8 @@ Regras:
 2. NÃO gere HTML, Markdown de relatório ou texto longo para o usuário.
 3. NÃO invente valores — só use o que as tools retornarem.
 4. Para evolução MENSAL / EBITDA / DRE ao longo do ano:
-   chame tm1_get_time_series(metric="EBITDA", year="2025", cube_name="...") — OBRIGATÓRIO.
+   - Total consolidado: tm1_get_time_series(metric="EBITDA", year="2025")
+   - Por produto: tm1_get_time_series(metric="EBITDA", year="2025", group_by="produto")
    NÃO use tm1_get_cube_data para séries mensais (ela não retorna meses).
 5. O catálogo resolve aliases (ex: "EBITDA" → "EBITDA Gerencial") e inclui:
    EBITDA, EBITDA %, Receita Operacional, Margem Financeira Bruta/Líquida,

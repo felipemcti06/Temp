@@ -26,6 +26,26 @@ class ReportRequest:
     cube: str
     version: str
     format: str
+    group_by: str | None = None
+    prompt_signature: str = ""
+
+
+GROUP_BY_PATTERNS = {
+    "produto": re.compile(
+        r"\b(por produto|por produtos|by product|by products|cada produto|produto a produto)\b",
+        re.IGNORECASE,
+    ),
+    "filial": re.compile(
+        r"\b(por filial|por filiais|by branch|by branches|cada filial|filial a filial)\b",
+        re.IGNORECASE,
+    ),
+}
+
+AGENT_ONLY_PATTERNS = re.compile(
+    r"\b(comparar|versus|vs\.?| orçado| orcado|budget|cenário|cenario|"
+    r"filial específica|produto específico|customiz|personaliz)\b",
+    re.IGNORECASE,
+)
 
 
 def load_catalog() -> dict[str, Any]:
@@ -72,6 +92,27 @@ def extract_year(text: str) -> str:
     return str(datetime.now().year)
 
 
+def detect_group_by(text: str) -> str | None:
+    lowered = text.lower()
+    for name, pattern in GROUP_BY_PATTERNS.items():
+        if pattern.search(lowered):
+            return name
+    return None
+
+
+def prompt_signature(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", text.lower().strip())
+    return normalized
+
+
+def requires_agent_pipeline(text: str) -> bool:
+    """Pedidos complexos não devem usar fast path determinístico."""
+    if AGENT_ONLY_PATTERNS.search(text):
+        return True
+    group_by = detect_group_by(text)
+    return group_by == "filial"
+
+
 def is_report_request(text: str) -> bool:
     return bool(REPORT_KEYWORDS.search(text))
 
@@ -84,12 +125,16 @@ def parse_report_request(text: str) -> ReportRequest | None:
     if not is_report_request(text):
         return None
 
+    if requires_agent_pipeline(text):
+        return None
+
     resolved = resolve_metric(text)
     if not resolved:
         return None
 
     metric_key, cfg = resolved
     year = extract_year(text)
+    group_by = detect_group_by(text)
 
     return ReportRequest(
         metric_key=metric_key,
@@ -98,4 +143,6 @@ def parse_report_request(text: str) -> ReportRequest | None:
         cube=cfg.get("cube", "RTB.100.DRE_Produto"),
         version=cfg.get("version", "REAL"),
         format=cfg.get("format", "currency"),
+        group_by=group_by,
+        prompt_signature=prompt_signature(text),
     )

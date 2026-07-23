@@ -117,3 +117,68 @@ def render_time_series_report(
         brand_name="CTI",
     )
     return title, html
+
+
+CHART_COLORS = [
+    "#6c63ff",
+    "#22c55e",
+    "#f59e0b",
+    "#ef4444",
+    "#06b6d4",
+    "#a855f7",
+    "#ec4899",
+    "#84cc16",
+    "#14b8a6",
+    "#f97316",
+    "#6366f1",
+    "#10b981",
+]
+
+
+def render_time_series_by_product_report(
+    request: ReportRequest,
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    series_groups = payload.get("series_groups") or []
+    month_labels = [row.get("label", "") for row in (series_groups[0].get("series") if series_groups else [])]
+
+    title = f"{request.metric_label} — Evolução mensal {request.year} por produto"
+    summary = payload.get("summary") or (
+        f"{request.metric_label} em {request.year} desagregado por produto (versão {request.version})."
+    )
+
+    chart_datasets = []
+    for idx, group in enumerate(series_groups):
+        color = CHART_COLORS[idx % len(CHART_COLORS)]
+        chart_datasets.append(
+            {
+                "label": group.get("name", f"Produto {idx + 1}"),
+                "data": [
+                    row.get("value") if isinstance(row.get("value"), (int, float)) else None
+                    for row in group.get("series", [])
+                ],
+                "borderColor": color,
+                "backgroundColor": color + "22",
+                "fill": False,
+                "tension": 0.25,
+                "pointRadius": 2,
+            }
+        )
+
+    template = _env.get_template("time_series_by_product.html.j2")
+    html = template.render(
+        title=title,
+        metric=request.metric_label,
+        period=request.year,
+        version=request.version,
+        cube=request.cube,
+        summary=summary,
+        series_groups=series_groups,
+        month_labels=month_labels,
+        chart_labels=month_labels,
+        chart_datasets=chart_datasets,
+        generated_at=datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC"),
+        logo_src=_logo_data_uri(),
+        brand_name="CTI",
+    )
+    return title, html

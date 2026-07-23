@@ -1,9 +1,11 @@
+import json
 import uuid
 import os
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from auth import (
@@ -14,6 +16,7 @@ from auth import (
     verify_credentials,
 )
 from chat_engine import any_llm_configured, generate_response
+from chat_streaming import stream_chat_events
 from llm_config import list_available_models, resolve_default_model_id
 from reports import get_report
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id, tm1_is_configured
@@ -192,6 +195,21 @@ async def chat(request: MessageRequest, user: str | None = Depends(get_current_u
         sessions[session_id].pop()
         raise HTTPException(status_code=500, detail=f"Erro ao gerar resposta: {exc}") from exc
 
+    return _build_message_response(
+        session_id=session_id,
+        response_text=response_text,
+        mode=mode,
+        model_id=request.model_id,
+    )
+
+
+def _build_message_response(
+    *,
+    session_id: str,
+    response_text: str,
+    mode: str,
+    model_id: str | None,
+) -> MessageResponse:
     sessions[session_id].append({"role": "assistant", "content": response_text})
 
     if len(sessions[session_id]) > 40:
@@ -201,8 +219,60 @@ async def chat(request: MessageRequest, user: str | None = Depends(get_current_u
         response=response_text,
         session_id=session_id,
         mode=mode,
-        model_id=request.model_id or resolve_default_model_id(),
+        model_id=model_id or resolve_default_model_id(),
         timestamp=datetime.utcnow().isoformat() + "Z",
+    )
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: MessageRequest, user: str | None = Depends(get_current_user)):
+    session_id = request.session_id or str(uuid.uuid4())
+
+    if session_id not in sessions:
+        sessions[session_id] = []
+
+    sessions[session_id].append({"role": "user", "content": request.message.strip()})
+
+    def worker(status_cb):
+        return generate_response(
+            sessions[session_id],
+            model_id=request.model_id,
+            username=user,
+            status_cb=status_cb,
+        )
+
+    async def event_stream():
+        try:
+            async for event in stream_chat_events(worker):
+                if event.startswith("event: done"):
+                    data_line = next(line for line in event.splitlines() if line.startswith("data: "))
+                    payload = json.loads(data_line[6:])
+                    sessions[session_id].append(
+                        {"role": "assistant", "content": payload.get("response", "")}
+                    )
+                    if len(sessions[session_id]) > 40:
+                        sessions[session_id] = sessions[session_id][-40:]
+                    payload["session_id"] = session_id
+                    payload["model_id"] = request.model_id or resolve_default_model_id()
+                    payload["timestamp"] = datetime.utcnow().isoformat() + "Z"
+                    yield f"event: done\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                elif event.startswith("event: error"):
+                    sessions[session_id].pop()
+                    yield event
+                else:
+                    yield event
+        except Exception as exc:
+            sessions[session_id].pop()
+            yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

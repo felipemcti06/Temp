@@ -1,7 +1,16 @@
+<header class="report-header">
+  {% if logo_src %}
+  <img class="report-logo" src="{{ logo_src }}" alt="{{ brand_name }}" />
+  {% endif %}
+  <div class="report-header__text">
+    <p class="report-brand">{{ brand_name }} · Relatório Gerencial</p>
+    <p class="report-meta">
+      {{ metric }} · {{ period }} · Versão {{ version }} · Gerado em {{ generated_at }}
+    </p>
+  </div>
+</header>
+
 <h1>{{ title }}</h1>
-<p class="report-meta">
-  {{ metric }} · {{ period }} · Versão {{ version }} · Cubo {{ cube }}
-</p>
 
 <section>
   <h2>Resumo executivo</h2>
@@ -73,8 +82,8 @@
       datasets: [{
         label: {{ metric | tojson }},
         data: values,
-        borderColor: "#4f46e5",
-        backgroundColor: "rgba(79, 70, 229, 0.12)",
+        borderColor: "#6c63ff",
+        backgroundColor: "rgba(108, 99, 255, 0.14)",
         fill: true,
         tension: 0.25,
         pointRadius: 3,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 
 from metrics_catalog import ReportRequest, parse_report_request
 from report_renderer import render_time_series_report
@@ -12,6 +13,13 @@ from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id
 from tm1_mdx_builder import query_time_series
 
 logger = logging.getLogger(__name__)
+
+StatusCallback = Callable[[str], None] | None
+
+
+def _emit(status_cb: StatusCallback, message: str) -> None:
+    if status_cb:
+        status_cb(message)
 
 
 def fast_path_enabled() -> bool:
@@ -28,6 +36,7 @@ def try_fast_report_path(
     mcp_client: TM1MCPClient,
     *,
     username: str | None = None,
+    status_cb: StatusCallback = None,
 ) -> tuple[str, str] | None:
     """
     Tenta gerar relatório determinístico quando o pedido bate no glossário.
@@ -44,6 +53,8 @@ def try_fast_report_path(
     if not request:
         return None
 
+    _emit(status_cb, "Interpretando pedido de relatório...")
+
     logger.info(
         "Fast path: metric=%s year=%s user=%s",
         request.metric_key,
@@ -53,6 +64,7 @@ def try_fast_report_path(
 
     try:
         connection_id = get_default_connection_id()
+        _emit(status_cb, f"Consultando TM1 ({request.metric_label} · {request.year})...")
         payload = query_time_series(
             mcp_client,
             connection_id,
@@ -61,6 +73,8 @@ def try_fast_report_path(
             cube_name=request.cube,
             version=request.version,
         )
+        if payload.get("_cached"):
+            _emit(status_cb, "Dados recuperados do cache TM1 (até 3 min).")
     except TM1MCPError as exc:
         logger.warning("Fast path TM1 error: %s", exc)
         return (
@@ -74,7 +88,9 @@ def try_fast_report_path(
             "fast-path-empty",
         )
 
+    _emit(status_cb, "Montando relatório HTML...")
     title, html = render_time_series_report(request, payload)
+    _emit(status_cb, "Publicando relatório...")
     report = create_report(title, html, created_by=username)
 
     text = (

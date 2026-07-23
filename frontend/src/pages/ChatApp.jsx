@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import ChatWindow from '../components/ChatWindow'
 import BrandLogo from '../components/BrandLogo'
 import ModelSelector, { getSavedModelId, saveModelId } from '../components/ModelSelector'
-import { apiFetch } from '../api'
+import { apiFetch, streamChat } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import '../App.css'
 
@@ -20,6 +20,7 @@ const MODE_LABELS = {
 function formatModeLabel(mode) {
   if (MODE_LABELS[mode]) return MODE_LABELS[mode]
   if (mode.startsWith('agents(')) return 'Agentes (dados → relatório)'
+  if (mode === 'fast-path') return 'Fast path (TM1 + template)'
   if (mode.includes('+fallback')) return 'IA (fallback)'
   return mode
 }
@@ -29,6 +30,7 @@ export default function ChatApp() {
   const [messages, setMessages] = useState([])
   const [sessionId, setSessionId] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [statusMessage, setStatusMessage] = useState('')
   const [mode, setMode] = useState('fallback')
   const [models, setModels] = useState([])
   const [modelId, setModelId] = useState('')
@@ -76,24 +78,20 @@ export default function ChatApp() {
       }
       setMessages((prev) => [...prev, userMsg])
       setLoading(true)
+      setStatusMessage('Analisando pedido...')
 
       try {
-        const res = await apiFetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        const data = await streamChat(
+          {
             message: text,
             session_id: sessionId,
             model_id: modelId || undefined,
-          }),
-        })
+          },
+          {
+            onStatus: (message) => setStatusMessage(message),
+          },
+        )
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error(err.detail || 'Falha na comunicação com o servidor')
-        }
-
-        const data = await res.json()
         setSessionId(data.session_id)
         setMode(data.mode)
 
@@ -120,6 +118,7 @@ export default function ChatApp() {
         ])
       } finally {
         setLoading(false)
+        setStatusMessage('')
       }
     },
     [sessionId, modelId, handleLogout],
@@ -153,10 +152,15 @@ export default function ChatApp() {
         disabled={loading}
       />
 
-      <ChatWindow messages={messages} onSend={sendMessage} loading={loading} />
+      <ChatWindow
+        messages={messages}
+        onSend={sendMessage}
+        loading={loading}
+        statusMessage={statusMessage}
+      />
 
       <footer className="app-footer">
-        ChatBot v1.4 · Agentes TM1 + Relatórios
+        ChatBot v1.5 · Fast path + SSE + Cache TM1
       </footer>
     </div>
   )

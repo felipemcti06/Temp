@@ -58,6 +58,21 @@ Capacidades TM1:
 
 
 ToolExecutor = Callable[[str, dict[str, Any]], str]
+StatusCallback = Callable[[str], None] | None
+
+_TOOL_STATUS_LABELS: dict[str, str] = {
+    "tm1_list_cubes": "Listando cubos no TM1...",
+    "tm1_list_dimensions": "Listando dimensões no TM1...",
+    "tm1_execute_mdx": "Executando consulta MDX...",
+    "tm1_get_cube_data": "Consultando dados do cubo...",
+    "tm1_get_time_series": "Consultando série temporal...",
+    "tm1_search": "Buscando no modelo TM1...",
+    "create_html_report": "Publicando relatório HTML...",
+}
+
+
+def _tool_status_message(fn_name: str) -> str:
+    return _TOOL_STATUS_LABELS.get(fn_name, f"Executando {fn_name}...")
 
 
 @dataclass
@@ -77,6 +92,12 @@ class ToolLoopConfig:
     report_created: bool = False
     report_url: str | None = None
     tool_trace: list[dict[str, Any]] = field(default_factory=list)
+    status_cb: StatusCallback = None
+    iteration: int = 0
+
+    def emit_status(self, message: str) -> None:
+        if self.status_cb:
+            self.status_cb(message)
 
     def should_force_tools(self) -> bool:
         if self.needs_report and not self.report_created:
@@ -145,6 +166,7 @@ def _run_tool_calls(cfg: ToolLoopConfig, tool_calls: list[tuple[str, str, dict]]
     results = []
     executor = cfg.tool_executor
     for call_id, fn_name, fn_args in tool_calls:
+        cfg.emit_status(_tool_status_message(fn_name))
         try:
             if executor:
                 result = executor(fn_name, fn_args)
@@ -169,7 +191,12 @@ def _openai_tool_loop(client: OpenAI, model: str, cfg: ToolLoopConfig) -> tuple[
     api_messages = [{"role": "system", "content": cfg.system_prompt}, *cfg.messages]
     temperature = cfg.temperature if cfg.should_force_tools() else max(cfg.temperature, 0.5)
 
-    for _ in range(cfg.max_iterations):
+    for iteration in range(cfg.max_iterations):
+        cfg.iteration = iteration + 1
+        if cfg.mcp_client and iteration == 0:
+            cfg.emit_status("Consultando TM1 (modelo de linguagem)...")
+        elif iteration > 0:
+            cfg.emit_status(f"Continuando análise (passo {cfg.iteration})...")
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": api_messages,
@@ -243,7 +270,12 @@ def _anthropic_tool_loop(client: Anthropic, model: str, cfg: ToolLoopConfig) -> 
     ]
     tools = _to_anthropic_tools(cfg.tools) if cfg.tools else None
 
-    for _ in range(cfg.max_iterations):
+    for iteration in range(cfg.max_iterations):
+        cfg.iteration = iteration + 1
+        if cfg.mcp_client and iteration == 0:
+            cfg.emit_status("Consultando TM1 (modelo de linguagem)...")
+        elif iteration > 0:
+            cfg.emit_status(f"Continuando análise (passo {cfg.iteration})...")
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": cfg.max_tokens,
@@ -329,6 +361,7 @@ def generate_with_model(
     system_prompt: str | None = None,
     mode_prefix: str | None = None,
     max_iterations: int | None = None,
+    status_cb: StatusCallback = None,
 ) -> tuple[str, str]:
     from report_tools import REPORT_TOOL_DEFINITIONS
     from tm1_tools import OPENAI_TOOL_DEFINITIONS
@@ -382,5 +415,6 @@ def generate_with_model(
         needs_report=needs_report,
         max_iterations=max_iterations or DEFAULT_MAX_ITERATIONS,
         mode_prefix=prefix,
+        status_cb=status_cb,
     )
     return run_tool_loop(option, cfg)

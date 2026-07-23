@@ -109,8 +109,10 @@ def generate_response(
     *,
     username: str | None = None,
     status_cb: Callable[[str], None] | None = None,
-) -> tuple[str, str]:
-    """Generate a chat response. Returns (response_text, mode)."""
+) -> tuple[str, str, dict]:
+    """Generate a chat response. Returns (response_text, mode, metadata)."""
+
+    meta: dict = {"cache_hit": False}
 
     def emit(message: str) -> None:
         if status_cb:
@@ -119,14 +121,14 @@ def generate_response(
     try:
         option = resolve_model_id(model_id)
     except ValueError as exc:
-        return str(exc), "error"
+        return str(exc), "error", meta
 
     if not option:
         last_user_msg = next(
             (m["content"] for m in reversed(messages) if m["role"] == "user"),
             "",
         )
-        return _fallback_response(last_user_msg), "fallback"
+        return _fallback_response(last_user_msg), "fallback", meta
 
     mcp_client = TM1MCPClient.from_env() if tm1_is_configured() else None
     wants_report = _needs_report(messages)
@@ -142,18 +144,21 @@ def generate_response(
             status_cb=status_cb,
         )
         if fast_result:
-            return fast_result
+            text, mode, fast_meta = fast_result
+            meta.update(fast_meta)
+            return text, mode, meta
 
     # Fase 1: pipeline de subagentes para pedidos de relatório HTML
     if wants_report and mcp_client and _agents_enabled():
         try:
-            return run_report_pipeline(
+            text, mode = run_report_pipeline(
                 messages,
                 option,
                 mcp_client=mcp_client,
                 username=username,
                 status_cb=status_cb,
             )
+            return text, mode, meta
         except Exception as exc:
             # Fallback para o fluxo monolítico se o pipeline falhar
             err_note = f"(Pipeline de agentes falhou: {exc}. Usando fluxo padrão.)\n\n"
@@ -166,8 +171,9 @@ def generate_response(
                 force_tools=force_tools,
                 needs_report=True,
                 username=username,
+                status_cb=status_cb,
             )
-            return err_note + text, f"{mode}+fallback"
+            return err_note + text, f"{mode}+fallback", meta
 
     force_tools = bool(mcp_client and (_needs_tm1_tools(messages) or wants_report))
     if force_tools:
@@ -175,14 +181,16 @@ def generate_response(
     else:
         emit("Gerando resposta...")
 
-    return generate_with_model(
+    text, mode = generate_with_model(
         messages,
         option,
         mcp_client=mcp_client,
         force_tools=force_tools,
         needs_report=wants_report,
         username=username,
+        status_cb=status_cb,
     )
+    return text, mode, meta
 
 
 def any_llm_configured() -> bool:

@@ -37,7 +37,7 @@ def try_fast_report_path(
     *,
     username: str | None = None,
     status_cb: StatusCallback = None,
-) -> tuple[str, str] | None:
+) -> tuple[str, str, dict] | None:
     """
     Tenta gerar relatório determinístico quando o pedido bate no glossário.
     Retorna (texto_resposta, mode) ou None para fallback ao pipeline de agentes.
@@ -54,6 +54,7 @@ def try_fast_report_path(
         return None
 
     _emit(status_cb, "Interpretando pedido de relatório...")
+    meta: dict = {"cache_hit": False}
 
     logger.info(
         "Fast path: metric=%s year=%s group_by=%s user=%s",
@@ -87,18 +88,21 @@ def try_fast_report_path(
                 version=request.version,
             )
         if payload.get("_cached"):
+            meta["cache_hit"] = True
             _emit(status_cb, "Dados recuperados do cache TM1 (até 3 min).")
     except TM1MCPError as exc:
         logger.warning("Fast path TM1 error: %s", exc)
         return (
             f"Não foi possível consultar {request.metric_label} ({request.year}) no TM1: {exc}",
             "fast-path-error",
+            meta,
         )
 
     if not payload.get("series") and not payload.get("series_groups"):
         return (
             f"Consulta de {request.metric_label} em {request.year} não retornou dados.",
             "fast-path-empty",
+            meta,
         )
 
     _emit(status_cb, "Montando relatório HTML...")
@@ -115,4 +119,4 @@ def try_fast_report_path(
         f"Abrir relatório: {report['url']}"
     )
     mode = "fast-path-by-product" if request.group_by == "produto" else "fast-path"
-    return text, mode
+    return text, mode, meta

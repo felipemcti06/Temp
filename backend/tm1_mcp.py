@@ -178,8 +178,20 @@ class TM1MCPClient:
             parts = []
             for item in result["content"]:
                 if item.get("type") == "text":
-                    parts.append(item.get("text", ""))
+                    text = (item.get("text") or "").strip()
+                    if text:
+                        parts.append(text)
             if parts:
+                merged: list[Any] = []
+                for part in parts:
+                    parsed = self._parse_tool_payload(part)
+                    if isinstance(parsed, dict):
+                        merged.append(parsed)
+                    elif isinstance(parsed, list):
+                        merged.extend(parsed)
+                if merged:
+                    return merged if len(merged) > 1 else merged[0]
+
                 combined = "\n".join(parts)
                 parsed = self._parse_tool_payload(combined)
                 if parsed is not None:
@@ -206,12 +218,29 @@ class TM1MCPClient:
             try:
                 items.append(json.loads(line))
             except json.JSONDecodeError:
-                return None
+                continue
 
         if len(items) > 1:
             return items
         if len(items) == 1:
             return items[0]
+
+        # Objetos JSON concatenados: {...}{...}
+        if text.startswith("{") and "}{" in text:
+            chunks = text.replace("}{", "}\n{").splitlines()
+            for line in chunks:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    items.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            if len(items) > 1:
+                return items
+            if len(items) == 1:
+                return items[0]
+
         return None
 
 

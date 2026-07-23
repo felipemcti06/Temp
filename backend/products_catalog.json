@@ -1,0 +1,13 @@
+{
+  "RTB.100.DRE_Produto": {
+    "ALL.D.Produto": [
+      "Rendas de Adiantamento a Depositante",
+      "Rendas de Empréstimos",
+      "Rendas de Cheque Especial",
+      "Rendas de Conta Garantida",
+      "Rendas de Títulos Descontados",
+      "Rendas de Financiamentos",
+      "Rendas de Financiamentos Rurais"
+    ]
+  }
+}

@@ -20,6 +20,7 @@ from chat_streaming import stream_chat_events
 from llm_config import list_available_models, resolve_default_model_id
 from reports import get_report
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id, tm1_is_configured
+from tm1_cache import cache_stats
 
 app = FastAPI(
     title="ChatBot API",
@@ -50,6 +51,7 @@ class MessageResponse(BaseModel):
     mode: str
     model_id: str | None = None
     timestamp: str
+    cache_hit: bool = False
 
 
 class HealthResponse(BaseModel):
@@ -63,6 +65,17 @@ class HealthResponse(BaseModel):
 class ModelsResponse(BaseModel):
     models: list[dict]
     default: str | None
+
+
+class TM1CacheStatsResponse(BaseModel):
+    enabled: bool
+    ttl_seconds: int
+    entries: int
+    hits: int
+    misses: int
+    sets: int
+    hit_rate: float
+    items: list[dict]
 
 
 class TM1StatusResponse(BaseModel):
@@ -176,6 +189,11 @@ async def tm1_status(_user: str | None = Depends(get_current_user)):
         )
 
 
+@app.get("/api/tm1/cache/stats", response_model=TM1CacheStatsResponse)
+async def tm1_cache_stats(_user: str | None = Depends(get_current_user)):
+    return TM1CacheStatsResponse(**cache_stats())
+
+
 @app.post("/api/chat", response_model=MessageResponse)
 async def chat(request: MessageRequest, user: str | None = Depends(get_current_user)):
     session_id = request.session_id or str(uuid.uuid4())
@@ -186,7 +204,7 @@ async def chat(request: MessageRequest, user: str | None = Depends(get_current_u
     sessions[session_id].append({"role": "user", "content": request.message.strip()})
 
     try:
-        response_text, mode = generate_response(
+        response_text, mode, meta = generate_response(
             sessions[session_id],
             model_id=request.model_id,
             username=user,
@@ -200,6 +218,7 @@ async def chat(request: MessageRequest, user: str | None = Depends(get_current_u
         response_text=response_text,
         mode=mode,
         model_id=request.model_id,
+        cache_hit=bool(meta.get("cache_hit")),
     )
 
 
@@ -209,6 +228,7 @@ def _build_message_response(
     response_text: str,
     mode: str,
     model_id: str | None,
+    cache_hit: bool = False,
 ) -> MessageResponse:
     sessions[session_id].append({"role": "assistant", "content": response_text})
 
@@ -221,6 +241,7 @@ def _build_message_response(
         mode=mode,
         model_id=model_id or resolve_default_model_id(),
         timestamp=datetime.utcnow().isoformat() + "Z",
+        cache_hit=cache_hit,
     )
 
 

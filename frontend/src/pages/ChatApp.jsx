@@ -33,6 +33,7 @@ export default function ChatApp() {
   const [loading, setLoading] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [mode, setMode] = useState('fallback')
+  const [cacheHit, setCacheHit] = useState(false)
   const [models, setModels] = useState([])
   const [modelId, setModelId] = useState('')
 
@@ -80,6 +81,7 @@ export default function ChatApp() {
       setMessages((prev) => [...prev, userMsg])
       setLoading(true)
       setStatusMessage('Analisando pedido...')
+      setCacheHit(false)
 
       try {
         const data = await streamChat(
@@ -95,6 +97,7 @@ export default function ChatApp() {
 
         setSessionId(data.session_id)
         setMode(data.mode)
+        setCacheHit(Boolean(data.cache_hit))
 
         setMessages((prev) => [
           ...prev,
@@ -126,6 +129,7 @@ export default function ChatApp() {
   )
 
   const modeLabel = formatModeLabel(mode)
+  const cacheLabel = cacheHit ? ' · Cache TM1' : ''
 
   return (
     <div className="app">
@@ -137,7 +141,7 @@ export default function ChatApp() {
           <h1>ChatBot</h1>
           <p>
             <span className="status-dot" />
-            Online · {modeLabel}
+            Online · {modeLabel}{cacheLabel}
             {username ? ` · ${username}` : ''}
           </p>
         </div>
@@ -161,7 +165,7 @@ export default function ChatApp() {
       />
 
       <footer className="app-footer">
-        ChatBot v1.5 · Fast path + SSE + Cache TM1
+        ChatBot v1.6 · SSE keep-alive + Cache TM1 visível
       </footer>
     </div>
   )

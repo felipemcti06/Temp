@@ -93,6 +93,8 @@ export async function streamChat(payload, { onStatus, onDone, onError }) {
 
       if (parsed.event === 'status') {
         onStatus?.(parsed.data.message)
+      } else if (parsed.event === 'ping') {
+        // keep-alive — mantém conexão SSE viva durante consultas longas
       } else if (parsed.event === 'done') {
         onDone?.(parsed.data)
         return parsed.data

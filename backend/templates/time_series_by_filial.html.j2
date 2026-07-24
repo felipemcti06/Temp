@@ -45,19 +45,32 @@
 
 <section>
   <h2>Ranking no ano</h2>
-  <p class="chart-caption">Total acumulado Jan–Dez por filial — comparação direta, eixo a partir de zero.</p>
-  <div class="chart-container chart-container--ranking" style="--ranking-rows: {{ ranking_labels | length }};">
-    <canvas id="ranking-chart"></canvas>
-  </div>
+  <p class="chart-caption">Total acumulado Jan–Dez por filial, ordenado do maior para o menor.</p>
+  <ul class="ranking-list">
+    {% for row in ranking_rows %}
+    <li class="ranking-item">
+      <span class="ranking-name">{{ row.name }}</span>
+      <div class="ranking-track" aria-hidden="true">
+        <div class="ranking-fill" style="width: {{ row.pct }}%; background-color: {{ row.color }};"></div>
+      </div>
+      <span class="ranking-value">{{ row.formatted_total }}</span>
+    </li>
+    {% endfor %}
+  </ul>
 </section>
 
 <section>
-  <h2>Evolução mensal</h2>
-  {% if trend_note %}
-  <p class="chart-caption">{{ trend_note }}</p>
-  {% endif %}
-  <div class="chart-container chart-container--trend">
-    <canvas id="trend-chart"></canvas>
+  <h2>Evolução mensal por filial</h2>
+  <p class="chart-caption">Um gráfico por filial — leitura individual, sem linhas sobrepostas.</p>
+  <div class="filial-charts-grid">
+    {% for chart in sparkline_charts %}
+    <article class="filial-chart-card">
+      <h3>{{ chart.name }}</h3>
+      <div class="filial-chart-wrap">
+        <canvas id="{{ chart.id }}"></canvas>
+      </div>
+    </article>
+    {% endfor %}
   </div>
 </section>
 
@@ -66,10 +79,7 @@
 (function () {
   const isPercent = {{ is_percent | tojson }};
   const monthLabels = {{ chart_labels | tojson }};
-  const rankingLabels = {{ ranking_labels | tojson }};
-  const rankingValues = {{ ranking_values | tojson }};
-  const rankingColors = {{ ranking_colors | tojson }};
-  const trendDatasets = {{ trend_datasets | tojson }};
+  const sparklineCharts = {{ sparkline_charts | tojson }};
 
   function formatValue(value) {
     if (value == null || Number.isNaN(value)) return "—";
@@ -77,76 +87,55 @@
     return value.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   }
 
-  const valueTick = (value) => formatValue(value);
-  const tooltipLabel = (context) => {
-    const label = context.dataset.label || "";
-    const value = context.parsed.y ?? context.parsed.x;
-    return `${label}: ${formatValue(value)}`;
-  };
+  sparklineCharts.forEach(function (chart) {
+    const canvas = document.getElementById(chart.id);
+    if (!canvas) return;
 
-  const rankingCtx = document.getElementById("ranking-chart");
-  if (rankingCtx && rankingLabels.length) {
-    new Chart(rankingCtx, {
-      type: "bar",
+    new Chart(canvas, {
+      type: "line",
       data: {
-        labels: rankingLabels,
+        labels: monthLabels,
         datasets: [{
-          label: "Total no ano",
-          data: rankingValues,
-          backgroundColor: rankingColors,
-          borderColor: rankingColors,
-          borderWidth: 1,
-          borderRadius: 6,
-          barThickness: 22,
+          label: chart.name,
+          data: chart.values,
+          borderColor: chart.color,
+          backgroundColor: chart.color + "33",
+          fill: true,
+          tension: 0,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          borderWidth: 2,
         }],
       },
       options: {
-        indexAxis: "y",
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: tooltipLabel } },
+          tooltip: {
+            callbacks: {
+              label: function (context) {
+                return formatValue(context.parsed.y);
+              },
+            },
+          },
         },
         scales: {
-          x: {
-            beginAtZero: true,
-            ticks: { callback: valueTick },
-            grid: { color: "rgba(148, 163, 184, 0.25)" },
-          },
           y: {
+            beginAtZero: true,
+            ticks: {
+              maxTicksLimit: 5,
+              callback: formatValue,
+            },
+            grid: { color: "rgba(148, 163, 184, 0.2)" },
+          },
+          x: {
+            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
             grid: { display: false },
           },
         },
       },
     });
-  }
-
-  const trendCtx = document.getElementById("trend-chart");
-  if (trendCtx && monthLabels.length && trendDatasets.length) {
-    new Chart(trendCtx, {
-      type: "line",
-      data: { labels: monthLabels, datasets: trendDatasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: {
-          legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
-          tooltip: { callbacks: { label: tooltipLabel } },
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            ticks: { callback: valueTick },
-            grid: { color: "rgba(148, 163, 184, 0.25)" },
-          },
-          x: {
-            grid: { display: false },
-          },
-        },
-      },
-    });
-  }
+  });
 })();
 </script>

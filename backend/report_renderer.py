@@ -219,29 +219,35 @@ def render_time_series_by_filial_report(
         key=_series_group_total,
         reverse=True,
     )
-    ranking_rows = [
-        {
-            "name": group.get("name", ""),
-            "total": _series_group_total(group),
-        }
-        for group in ranked_groups
-    ]
-    ranking_labels = [row["name"] for row in ranking_rows]
-    ranking_values = [row["total"] for row in ranking_rows]
-    ranking_colors = [CHART_COLORS[idx % len(CHART_COLORS)] for idx in range(len(ranking_rows))]
+    is_percent = request.format == "percent"
+    max_total = max((_series_group_total(group) for group in ranked_groups), default=0.0)
+    ranking_rows = []
+    for idx, group in enumerate(ranked_groups):
+        total = _series_group_total(group)
+        ranking_rows.append(
+            {
+                "name": group.get("name", ""),
+                "total": total,
+                "formatted_total": _format_display(total, None, is_percent=is_percent),
+                "pct": round((abs(total) / abs(max_total)) * 100, 1) if max_total else 0.0,
+                "color": CHART_COLORS[idx % len(CHART_COLORS)],
+            }
+        )
 
-    top_trend_count = min(5, len(ranked_groups))
-    trend_groups = ranked_groups[:top_trend_count]
-    trend_datasets = [
-        _build_line_dataset(group, idx, fallback_label=f"Filial {idx + 1}")
-        for idx, group in enumerate(trend_groups)
-    ]
-    trend_note = (
-        f"Exibindo as {top_trend_count} filiais com maior volume no ano. "
-        "Demais filiais estão na tabela acima."
-        if len(ranked_groups) > top_trend_count
-        else None
-    )
+    sparkline_charts = []
+    for idx, group in enumerate(ranked_groups):
+        color = CHART_COLORS[idx % len(CHART_COLORS)]
+        sparkline_charts.append(
+            {
+                "id": f"filial-spark-{idx}",
+                "name": group.get("name", f"Filial {idx + 1}"),
+                "color": color,
+                "values": [
+                    row.get("value") if isinstance(row.get("value"), (int, float)) else None
+                    for row in group.get("series", [])
+                ],
+            }
+        )
 
     template = _env.get_template("time_series_by_filial.html.j2")
     html = template.render(
@@ -254,12 +260,9 @@ def render_time_series_by_filial_report(
         series_groups=series_groups,
         month_labels=month_labels,
         chart_labels=month_labels,
-        ranking_labels=ranking_labels,
-        ranking_values=ranking_values,
-        ranking_colors=ranking_colors,
-        trend_datasets=trend_datasets,
-        trend_note=trend_note,
-        is_percent=request.format == "percent",
+        ranking_rows=ranking_rows,
+        sparkline_charts=sparkline_charts,
+        is_percent=is_percent,
         generated_at=datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC"),
         logo_src=_logo_data_uri(),
         brand_name="CTI",

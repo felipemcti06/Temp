@@ -55,15 +55,10 @@ CHART_SAFE_CSS = """
       width: 100%;
       max-width: 900px;
       margin: 1.5rem auto;
-      overflow: hidden;
     }
     .chart-container--tall {
       height: 480px;
       max-height: 480px;
-    }
-    .chart-container--ranking {
-      height: min(420px, calc(56px + var(--ranking-rows, 9) * 34px));
-      max-height: 520px;
     }
     .chart-container--trend {
       height: 420px;
@@ -74,17 +69,81 @@ CHART_SAFE_CSS = """
       color: #64748b;
       font-size: 0.92rem;
     }
-    .chart-container canvas {
+    .chart-container canvas,
+    canvas#chart {
       display: block;
       max-width: 100%;
-      max-height: 420px;
+      width: 100% !important;
     }
-    canvas[id*="chart" i] {
-      display: block;
-      max-width: 900px;
+    canvas#chart {
       max-height: 420px !important;
       height: 420px !important;
-      width: 100% !important;
+    }
+    .ranking-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      max-width: 900px;
+    }
+    .ranking-item {
+      display: grid;
+      grid-template-columns: 120px 1fr auto;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .ranking-name {
+      font-weight: 600;
+      font-size: 0.92rem;
+      color: #1e293b;
+    }
+    .ranking-track {
+      height: 28px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .ranking-fill {
+      height: 100%;
+      min-width: 4px;
+      border-radius: 999px;
+      transition: width 0.2s ease;
+    }
+    .ranking-value {
+      font-variant-numeric: tabular-nums;
+      font-size: 0.92rem;
+      color: #334155;
+      min-width: 110px;
+      text-align: right;
+    }
+    .filial-charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+      max-width: 100%;
+    }
+    .filial-chart-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 1rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .filial-chart-card h3 {
+      margin: 0 0 0.75rem;
+      font-size: 0.95rem;
+      color: #1e293b;
+    }
+    .filial-chart-wrap {
+      position: relative;
+      height: 180px;
+      width: 100%;
+    }
+    .filial-chart-wrap canvas {
+      max-height: 180px !important;
+      height: 180px !important;
     }
     body {
       overflow-x: auto;

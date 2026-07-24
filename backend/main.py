@@ -15,9 +15,16 @@ from auth import (
     get_optional_user,
     verify_credentials,
 )
+from catalog_sync import (
+    DEFAULT_CUBE,
+    format_sync_report,
+    sync_catalogs_from_tm1,
+    write_sync_report,
+)
 from chat_engine import any_llm_configured, generate_response
 from chat_streaming import stream_chat_events
 from llm_config import list_available_models, resolve_default_model_id
+from metrics_catalog import list_catalog_metrics
 from reports import get_report
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id, tm1_is_configured
 from tm1_cache import cache_stats
@@ -82,6 +89,25 @@ class TM1CacheStatsResponse(BaseModel):
     sets: int
     hit_rate: float
     items: list[dict]
+
+
+class CatalogMetricsResponse(BaseModel):
+    metrics: list[str]
+    total: int
+
+
+class CatalogSyncResponse(BaseModel):
+    cube: str
+    dry_run: bool
+    account_count: int
+    product_count: int
+    metrics_added: list[str]
+    metrics_updated: list[str]
+    metrics_unchanged: int
+    metrics_removed: list[str]
+    products_added: list[str]
+    products_updated: list[str]
+    summary: str
 
 
 class TM1StatusResponse(BaseModel):
@@ -201,6 +227,55 @@ async def tm1_status(_user: str | None = Depends(get_current_user)):
 @app.get("/api/tm1/cache/stats", response_model=TM1CacheStatsResponse)
 async def tm1_cache_stats(_user: str | None = Depends(get_current_user)):
     return TM1CacheStatsResponse(**cache_stats())
+
+
+@app.get("/api/catalog/metrics", response_model=CatalogMetricsResponse)
+async def catalog_metrics(_user: str | None = Depends(get_current_user)):
+    metrics = list_catalog_metrics()
+    return CatalogMetricsResponse(metrics=metrics, total=len(metrics))
+
+
+@app.post("/api/admin/sync-catalog", response_model=CatalogSyncResponse)
+async def sync_catalog_admin(
+    write: bool = False,
+    prune: bool = False,
+    cube: str = DEFAULT_CUBE,
+    _user: str | None = Depends(get_current_user),
+):
+    client = TM1MCPClient.from_env()
+    connection_id = get_default_connection_id()
+    if not client or not connection_id:
+        raise HTTPException(
+            status_code=503,
+            detail="TM1 não configurado (TM1_MCP_URL, TM1_MCP_TOKEN, TM1_CONNECTION_ID)",
+        )
+
+    try:
+        report = sync_catalogs_from_tm1(
+            client,
+            connection_id,
+            cube_name=cube,
+            prune=prune,
+        )
+    except TM1MCPError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if write:
+        write_sync_report(report)
+
+    return CatalogSyncResponse(
+        cube=report.cube_name,
+        dry_run=not write,
+        account_count=report.account_count,
+        product_count=report.product_count,
+        metrics_added=report.metrics.added,
+        metrics_updated=report.metrics.updated,
+        metrics_unchanged=len(report.metrics.unchanged),
+        metrics_removed=report.metrics.removed,
+        products_added=report.products.added,
+        products_updated=report.products.updated,
+        summary=format_sync_report(report),
+    )
 
 
 @app.post("/api/chat", response_model=MessageResponse)

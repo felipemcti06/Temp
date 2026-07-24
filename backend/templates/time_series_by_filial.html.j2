@@ -44,30 +44,109 @@
 </section>
 
 <section>
-  <h2>Gráfico comparativo</h2>
-  <div class="chart-container chart-container--tall">
-    <canvas id="chart"></canvas>
+  <h2>Ranking no ano</h2>
+  <p class="chart-caption">Total acumulado Jan–Dez por filial — comparação direta, eixo a partir de zero.</p>
+  <div class="chart-container chart-container--ranking" style="--ranking-rows: {{ ranking_labels | length }};">
+    <canvas id="ranking-chart"></canvas>
+  </div>
+</section>
+
+<section>
+  <h2>Evolução mensal</h2>
+  {% if trend_note %}
+  <p class="chart-caption">{{ trend_note }}</p>
+  {% endif %}
+  <div class="chart-container chart-container--trend">
+    <canvas id="trend-chart"></canvas>
   </div>
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 (function () {
-  const labels = {{ chart_labels | tojson }};
-  const datasets = {{ chart_datasets | tojson }};
-  const ctx = document.getElementById("chart");
-  if (!ctx || !labels.length || !datasets.length) return;
+  const isPercent = {{ is_percent | tojson }};
+  const monthLabels = {{ chart_labels | tojson }};
+  const rankingLabels = {{ ranking_labels | tojson }};
+  const rankingValues = {{ ranking_values | tojson }};
+  const rankingColors = {{ ranking_colors | tojson }};
+  const trendDatasets = {{ trend_datasets | tojson }};
 
-  new Chart(ctx, {
-    type: "line",
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      aspectRatio: 2.4,
-      plugins: { legend: { position: "bottom" } },
-      scales: { y: { beginAtZero: false } }
-    }
-  });
+  function formatValue(value) {
+    if (value == null || Number.isNaN(value)) return "—";
+    if (isPercent) return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+    return value.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  }
+
+  const valueTick = (value) => formatValue(value);
+  const tooltipLabel = (context) => {
+    const label = context.dataset.label || "";
+    const value = context.parsed.y ?? context.parsed.x;
+    return `${label}: ${formatValue(value)}`;
+  };
+
+  const rankingCtx = document.getElementById("ranking-chart");
+  if (rankingCtx && rankingLabels.length) {
+    new Chart(rankingCtx, {
+      type: "bar",
+      data: {
+        labels: rankingLabels,
+        datasets: [{
+          label: "Total no ano",
+          data: rankingValues,
+          backgroundColor: rankingColors,
+          borderColor: rankingColors,
+          borderWidth: 1,
+          borderRadius: 6,
+          barThickness: 22,
+        }],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: tooltipLabel } },
+        },
+        scales: {
+          x: {
+            beginAtZero: true,
+            ticks: { callback: valueTick },
+            grid: { color: "rgba(148, 163, 184, 0.25)" },
+          },
+          y: {
+            grid: { display: false },
+          },
+        },
+      },
+    });
+  }
+
+  const trendCtx = document.getElementById("trend-chart");
+  if (trendCtx && monthLabels.length && trendDatasets.length) {
+    new Chart(trendCtx, {
+      type: "line",
+      data: { labels: monthLabels, datasets: trendDatasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { position: "bottom", labels: { boxWidth: 12, padding: 16 } },
+          tooltip: { callbacks: { label: tooltipLabel } },
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { callback: valueTick },
+            grid: { color: "rgba(148, 163, 184, 0.25)" },
+          },
+          x: {
+            grid: { display: false },
+          },
+        },
+      },
+    });
+  }
 })();
 </script>

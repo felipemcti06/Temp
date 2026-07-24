@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id
-from tm1_mdx_builder import query_cube_data, query_time_series, query_time_series_by_product
+from tm1_mdx_builder import query_cube_data, query_time_series, query_time_series_by_filial, query_time_series_by_product
 
 MAX_TOOL_RESULT_CHARS = 12_000
 DEFAULT_MDX_TOP = 50
@@ -166,8 +166,8 @@ OPENAI_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                     "group_by": {
                         "type": "string",
-                        "enum": ["produto"],
-                        "description": "Desagregação: use 'produto' para série mensal por produto.",
+                        "enum": ["produto", "filial"],
+                        "description": "Desagregação: 'produto' ou 'filial' para série mensal desagregada.",
                     },
                 },
                 "required": ["year"],
@@ -372,6 +372,17 @@ def execute_tm1_tool(client: TM1MCPClient, tool_name: str, arguments: dict[str, 
     if tool_name == "tm1_get_time_series":
         if arguments.get("group_by") == "produto":
             result = query_time_series_by_product(
+                client,
+                connection_id,
+                cube_name=arguments.get("cube_name"),
+                metric=arguments.get("metric"),
+                year=arguments.get("year", "2025"),
+                version=arguments.get("version"),
+                account=arguments.get("account"),
+                measure=arguments.get("measure"),
+            )
+        elif arguments.get("group_by") == "filial":
+            result = query_time_series_by_filial(
                 client,
                 connection_id,
                 cube_name=arguments.get("cube_name"),

@@ -21,6 +21,7 @@ Regras:
 4. Para evolução MENSAL / EBITDA / DRE ao longo do ano:
    - Total consolidado: tm1_get_time_series(metric="EBITDA", year="2025")
    - Por produto: tm1_get_time_series(metric="EBITDA", year="2025", group_by="produto")
+   - Por filial: tm1_get_time_series(metric="EBITDA", year="2025", group_by="filial")
    NÃO use tm1_get_cube_data para séries mensais (ela não retorna meses).
 5. O catálogo resolve aliases (ex: "EBITDA" → "EBITDA Gerencial") e inclui:
    EBITDA, EBITDA %, Receita Operacional, Margem Financeira Bruta/Líquida,

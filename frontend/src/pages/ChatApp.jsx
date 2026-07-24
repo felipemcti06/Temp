@@ -23,6 +23,7 @@ function formatModeLabel(mode) {
   if (mode.startsWith('agents(')) return 'Agentes (dados → relatório)'
   if (mode === 'fast-path') return 'Fast path (TM1 + template)'
   if (mode === 'fast-path-by-product') return 'Fast path por produto'
+  if (mode === 'fast-path-by-filial') return 'Fast path por filial'
   if (mode.includes('+fallback')) return 'IA (fallback)'
   return mode
 }

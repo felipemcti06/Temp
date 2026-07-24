@@ -107,10 +107,7 @@ def prompt_signature(text: str) -> str:
 
 def requires_agent_pipeline(text: str) -> bool:
     """Pedidos complexos não devem usar fast path determinístico."""
-    if AGENT_ONLY_PATTERNS.search(text):
-        return True
-    group_by = detect_group_by(text)
-    return group_by == "filial"
+    return bool(AGENT_ONLY_PATTERNS.search(text))
 
 
 def is_report_request(text: str) -> bool:

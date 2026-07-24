@@ -31,6 +31,11 @@ ACCOUNT_SKIP_PATTERNS = re.compile(
     r"^(total|nao_alocado|não_alocado|nao alocado|dummy|temp|teste)\b",
     re.IGNORECASE,
 )
+GERENCIAL_CODE_PATTERN = re.compile(r"^D\.\d", re.IGNORECASE)
+STRUCTURAL_ACCOUNT_NAMES = {
+    "total conta dre",
+    "total_conta_dre",
+}
 
 
 @dataclass
@@ -63,6 +68,7 @@ class SyncReport:
     products_catalog: dict[str, Any]
     account_count: int = 0
     product_count: int = 0
+    gerencial_only: bool = True
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -134,7 +140,35 @@ def discover_cube_defaults(
     )
 
 
-def _should_include_account(name: str, item: dict[str, Any]) -> bool:
+def _is_structural_account_code(name: str) -> bool:
+    return bool(GERENCIAL_CODE_PATTERN.match(name.strip()))
+
+
+def _is_gerencial_named_account(name: str, item: dict[str, Any]) -> bool:
+    """Inclui linhas gerenciais nomeadas; exclui códigos D.x.x.x e totais estruturais."""
+    if _is_structural_account_code(name):
+        return False
+
+    lowered = name.strip().lower()
+    if lowered in STRUCTURAL_ACCOUNT_NAMES:
+        return False
+
+    if "%" in name:
+        return True
+
+    elem_type = (item.get("Type") or "").lower()
+    if elem_type == "consolidated" and re.search(r"[A-Za-zÀ-ÿ]{2,}", name):
+        return True
+
+    return False
+
+
+def _should_include_account(
+    name: str,
+    item: dict[str, Any],
+    *,
+    gerencial_only: bool = True,
+) -> bool:
     if not name or ACCOUNT_SKIP_PATTERNS.search(name):
         return False
 
@@ -142,11 +176,13 @@ def _should_include_account(name: str, item: dict[str, Any]) -> bool:
     if lowered.startswith("total_") or lowered.endswith("_total"):
         return False
 
+    if gerencial_only:
+        return _is_gerencial_named_account(name, item)
+
     elem_type = (item.get("Type") or "").lower()
     if elem_type == "numeric":
         return True
     if elem_type == "consolidated":
-        # Linhas gerenciais consolidadas (EBITDA, Receita, etc.)
         return True
     if item.get("Level") == 0:
         return True
@@ -159,6 +195,7 @@ def fetch_account_elements(
     account_dim: str,
     *,
     top: int = 500,
+    gerencial_only: bool = True,
 ) -> list[str]:
     items = _list_element_items(client, connection_id, account_dim, top=top)
     names: list[str] = []
@@ -168,7 +205,7 @@ def fetch_account_elements(
         name = item.get("Name", "")
         if not name or name in seen:
             continue
-        if not _should_include_account(name, item):
+        if not _should_include_account(name, item, gerencial_only=gerencial_only):
             continue
         seen.add(name)
         names.append(name)
@@ -332,9 +369,15 @@ def sync_catalogs_from_tm1(
     *,
     cube_name: str = DEFAULT_CUBE,
     prune: bool = False,
+    gerencial_only: bool = True,
 ) -> SyncReport:
     defaults = discover_cube_defaults(client, connection_id, cube_name)
-    accounts = fetch_account_elements(client, connection_id, defaults.account_dim)
+    accounts = fetch_account_elements(
+        client,
+        connection_id,
+        defaults.account_dim,
+        gerencial_only=gerencial_only,
+    )
 
     existing_metrics = load_json(METRICS_CATALOG_PATH)
     metrics_catalog, metrics_diff = merge_metrics_catalog(
@@ -368,6 +411,7 @@ def sync_catalogs_from_tm1(
         products_catalog=products_catalog,
         account_count=len(accounts),
         product_count=product_count,
+        gerencial_only=gerencial_only,
     )
 
 
@@ -379,6 +423,7 @@ def write_sync_report(report: SyncReport) -> None:
 def format_sync_report(report: SyncReport) -> str:
     lines = [
         f"Cubo: {report.cube_name}",
+        f"Filtro: {'linhas gerenciais nomeadas' if report.gerencial_only else 'todas as contas'}",
         f"Contas TM1: {report.account_count}",
         f"Produtos TM1: {report.product_count}",
         "",

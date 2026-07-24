@@ -42,6 +42,11 @@ def main() -> int:
         help="Grava metrics_catalog.json e products_catalog.json (default: dry-run)",
     )
     parser.add_argument(
+        "--all-accounts",
+        action="store_true",
+        help="Inclui códigos D.x.x.x (default: só linhas gerenciais nomeadas)",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Remove entradas do catálogo cujas contas não existem mais no TM1",
@@ -68,11 +73,13 @@ def main() -> int:
         connection_id,
         cube_name=args.cube,
         prune=args.prune,
+        gerencial_only=not args.all_accounts,
     )
 
     if args.json:
         payload = {
             "cube": report.cube_name,
+            "gerencial_only": report.gerencial_only,
             "account_count": report.account_count,
             "product_count": report.product_count,
             "metrics": {

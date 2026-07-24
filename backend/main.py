@@ -240,6 +240,8 @@ async def sync_catalog_admin(
     write: bool = False,
     prune: bool = False,
     cube: str = DEFAULT_CUBE,
+    gerencial_only: bool = True,
+    all_accounts: bool = False,
     _user: str | None = Depends(get_current_user),
 ):
     client = TM1MCPClient.from_env()
@@ -256,6 +258,7 @@ async def sync_catalog_admin(
             connection_id,
             cube_name=cube,
             prune=prune,
+            gerencial_only=gerencial_only and not all_accounts,
         )
     except TM1MCPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

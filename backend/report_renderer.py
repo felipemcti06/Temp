@@ -120,19 +120,51 @@ def render_time_series_report(
 
 
 CHART_COLORS = [
-    "#6c63ff",
-    "#22c55e",
-    "#f59e0b",
-    "#ef4444",
-    "#06b6d4",
-    "#a855f7",
-    "#ec4899",
-    "#84cc16",
-    "#14b8a6",
-    "#f97316",
-    "#6366f1",
-    "#10b981",
+    "#2563eb",
+    "#16a34a",
+    "#ea580c",
+    "#dc2626",
+    "#0891b2",
+    "#7c3aed",
+    "#db2777",
+    "#65a30d",
+    "#0d9488",
+    "#c2410c",
+    "#4f46e5",
+    "#059669",
 ]
+
+
+def _series_group_total(group: dict[str, Any]) -> float:
+    total = 0.0
+    for row in group.get("series", []):
+        value = row.get("value")
+        if isinstance(value, (int, float)):
+            total += value
+    return total
+
+
+def _group_has_data(group: dict[str, Any]) -> bool:
+    return any(isinstance(row.get("value"), (int, float)) for row in group.get("series", []))
+
+
+def _build_line_dataset(group: dict[str, Any], idx: int, *, fallback_label: str) -> dict[str, Any]:
+    color = CHART_COLORS[idx % len(CHART_COLORS)]
+    return {
+        "label": group.get("name", fallback_label),
+        "data": [
+            row.get("value") if isinstance(row.get("value"), (int, float)) else None
+            for row in group.get("series", [])
+        ],
+        "borderColor": color,
+        "backgroundColor": color,
+        "fill": False,
+        "tension": 0,
+        "pointRadius": 3,
+        "pointHoverRadius": 5,
+        "borderWidth": 2,
+        "spanGaps": False,
+    }
 
 
 def render_time_series_by_product_report(
@@ -149,21 +181,7 @@ def render_time_series_by_product_report(
 
     chart_datasets = []
     for idx, group in enumerate(series_groups):
-        color = CHART_COLORS[idx % len(CHART_COLORS)]
-        chart_datasets.append(
-            {
-                "label": group.get("name", f"Produto {idx + 1}"),
-                "data": [
-                    row.get("value") if isinstance(row.get("value"), (int, float)) else None
-                    for row in group.get("series", [])
-                ],
-                "borderColor": color,
-                "backgroundColor": color + "22",
-                "fill": False,
-                "tension": 0.25,
-                "pointRadius": 2,
-            }
-        )
+        chart_datasets.append(_build_line_dataset(group, idx, fallback_label=f"Produto {idx + 1}"))
 
     template = _env.get_template("time_series_by_product.html.j2")
     html = template.render(
@@ -196,23 +214,34 @@ def render_time_series_by_filial_report(
         f"{request.metric_label} em {request.year} desagregado por filial (versão {request.version})."
     )
 
-    chart_datasets = []
-    for idx, group in enumerate(series_groups):
-        color = CHART_COLORS[idx % len(CHART_COLORS)]
-        chart_datasets.append(
-            {
-                "label": group.get("name", f"Filial {idx + 1}"),
-                "data": [
-                    row.get("value") if isinstance(row.get("value"), (int, float)) else None
-                    for row in group.get("series", [])
-                ],
-                "borderColor": color,
-                "backgroundColor": color + "22",
-                "fill": False,
-                "tension": 0.25,
-                "pointRadius": 2,
-            }
-        )
+    ranked_groups = sorted(
+        [group for group in series_groups if _group_has_data(group)],
+        key=_series_group_total,
+        reverse=True,
+    )
+    ranking_rows = [
+        {
+            "name": group.get("name", ""),
+            "total": _series_group_total(group),
+        }
+        for group in ranked_groups
+    ]
+    ranking_labels = [row["name"] for row in ranking_rows]
+    ranking_values = [row["total"] for row in ranking_rows]
+    ranking_colors = [CHART_COLORS[idx % len(CHART_COLORS)] for idx in range(len(ranking_rows))]
+
+    top_trend_count = min(5, len(ranked_groups))
+    trend_groups = ranked_groups[:top_trend_count]
+    trend_datasets = [
+        _build_line_dataset(group, idx, fallback_label=f"Filial {idx + 1}")
+        for idx, group in enumerate(trend_groups)
+    ]
+    trend_note = (
+        f"Exibindo as {top_trend_count} filiais com maior volume no ano. "
+        "Demais filiais estão na tabela acima."
+        if len(ranked_groups) > top_trend_count
+        else None
+    )
 
     template = _env.get_template("time_series_by_filial.html.j2")
     html = template.render(
@@ -225,7 +254,12 @@ def render_time_series_by_filial_report(
         series_groups=series_groups,
         month_labels=month_labels,
         chart_labels=month_labels,
-        chart_datasets=chart_datasets,
+        ranking_labels=ranking_labels,
+        ranking_values=ranking_values,
+        ranking_colors=ranking_colors,
+        trend_datasets=trend_datasets,
+        trend_note=trend_note,
+        is_percent=request.format == "percent",
         generated_at=datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC"),
         logo_src=_logo_data_uri(),
         brand_name="CTI",

@@ -61,6 +61,19 @@ CHART_SAFE_CSS = """
       height: 480px;
       max-height: 480px;
     }
+    .chart-container--ranking {
+      height: min(420px, calc(56px + var(--ranking-rows, 9) * 34px));
+      max-height: 520px;
+    }
+    .chart-container--trend {
+      height: 420px;
+      max-height: 420px;
+    }
+    .chart-caption {
+      margin: 0 0 0.75rem;
+      color: #64748b;
+      font-size: 0.92rem;
+    }
     .chart-container canvas {
       display: block;
       max-width: 100%;

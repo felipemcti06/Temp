@@ -7,11 +7,15 @@ import os
 from collections.abc import Callable
 
 from metrics_catalog import ReportRequest, parse_report_request
-from report_renderer import render_time_series_by_product_report, render_time_series_report
+from report_renderer import (
+    render_time_series_by_filial_report,
+    render_time_series_by_product_report,
+    render_time_series_report,
+)
 from reports import create_report
 from tm1_cache import build_report_cache_payload, get_cached, set_cached
 from tm1_mcp import TM1MCPClient, TM1MCPError, get_default_connection_id
-from tm1_mdx_builder import query_time_series, query_time_series_by_product
+from tm1_mdx_builder import query_time_series, query_time_series_by_filial, query_time_series_by_product
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +102,16 @@ def try_fast_report_path(
                 cube_name=request.cube,
                 version=request.version,
             )
+        elif request.group_by == "filial":
+            _emit(status_cb, f"Consultando TM1 por filial ({request.metric_label} · {request.year})...")
+            payload = query_time_series_by_filial(
+                mcp_client,
+                connection_id,
+                metric=request.metric_key,
+                year=request.year,
+                cube_name=request.cube,
+                version=request.version,
+            )
         else:
             _emit(status_cb, f"Consultando TM1 ({request.metric_label} · {request.year})...")
             payload = query_time_series(
@@ -130,6 +144,8 @@ def try_fast_report_path(
     _emit(status_cb, "Montando relatório HTML...")
     if request.group_by == "produto":
         title, html = render_time_series_by_product_report(request, payload)
+    elif request.group_by == "filial":
+        title, html = render_time_series_by_filial_report(request, payload)
     else:
         title, html = render_time_series_report(request, payload)
     _emit(status_cb, "Publicando relatório...")
@@ -146,7 +162,12 @@ def try_fast_report_path(
         f"Resumo: {payload.get('summary', 'Série mensal obtida.')}\n\n"
         f"Abrir relatório: {report['url']}"
     )
-    mode = "fast-path-by-product" if request.group_by == "produto" else "fast-path"
+    if request.group_by == "produto":
+        mode = "fast-path-by-product"
+    elif request.group_by == "filial":
+        mode = "fast-path-by-filial"
+    else:
+        mode = "fast-path"
 
     set_cached(
         RESPONSE_CACHE_NS,

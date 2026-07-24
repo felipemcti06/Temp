@@ -1,0 +1,15 @@
+{
+  "RTB.100.DRE_Produto": {
+    "ALL.D.Filial": [
+      "FIL_001",
+      "FIL_002",
+      "FIL_003",
+      "PA_SEDE",
+      "PA_001",
+      "PA_002",
+      "PA_003",
+      "PA_004",
+      "PA_005"
+    ]
+  }
+}

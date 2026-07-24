@@ -27,6 +27,7 @@ MONTH_LABELS = {
 
 _CATALOG_PATH = Path(__file__).with_name("metrics_catalog.json")
 _PRODUCTS_CATALOG_PATH = Path(__file__).with_name("products_catalog.json")
+_FILIAIS_CATALOG_PATH = Path(__file__).with_name("filiais_catalog.json")
 
 
 def _load_catalog() -> dict[str, Any]:
@@ -180,6 +181,64 @@ def _list_product_leaves(
 
     if cube_name:
         fallback = _fallback_product_leaves(cube_name, produto_dim, limit=limit)
+        if fallback:
+            return fallback
+
+    return []
+
+
+def _load_filiais_catalog() -> dict[str, Any]:
+    if not _FILIAIS_CATALOG_PATH.exists():
+        return {}
+    return json.loads(_FILIAIS_CATALOG_PATH.read_text(encoding="utf-8"))
+
+
+def _fallback_filial_leaves(cube_name: str, filial_dim: str, *, limit: int = 12) -> list[str]:
+    catalog = _load_filiais_catalog()
+    cube_cfg = catalog.get(cube_name) or {}
+    names = cube_cfg.get(filial_dim) or cube_cfg.get("ALL.D.Filial") or []
+    return [n for n in names if n][:limit]
+
+
+def _list_filial_leaves(
+    client: TM1MCPClient,
+    connection_id: str,
+    filial_dim: str,
+    *,
+    cube_name: str | None = None,
+    limit: int = 12,
+) -> list[str]:
+    items = _list_element_items(client, connection_id, filial_dim, top=100)
+    excluded = {"Total_Filial", "N/A", "Nao_Alocado_Filial"}
+    leaves: list[str] = []
+
+    for item in items:
+        name = item.get("Name", "")
+        if not name or name in excluded:
+            continue
+        elem_type = (item.get("Type") or "").lower()
+        if elem_type == "numeric":
+            leaves.append(name)
+            continue
+        if elem_type == "consolidated" or name.lower().startswith("total"):
+            continue
+        if item.get("Level") == 0:
+            leaves.append(name)
+
+    if not leaves:
+        for item in items:
+            name = item.get("Name", "")
+            if not name or name in excluded:
+                continue
+            if name.lower().startswith("total"):
+                continue
+            leaves.append(name)
+
+    if leaves:
+        return leaves[:limit]
+
+    if cube_name:
+        fallback = _fallback_filial_leaves(cube_name, filial_dim, limit=limit)
         if fallback:
             return fallback
 
@@ -627,4 +686,143 @@ def query_time_series_by_product(
         "sources": [{"tool": "query_time_series_by_product", "mdx": mdx}],
     }
     set_cached("time_series_by_product", cache_payload, result)
+    return result
+
+
+def query_time_series_by_filial(
+    client: TM1MCPClient,
+    connection_id: str,
+    *,
+    cube_name: str | None = None,
+    metric: str | None = None,
+    year: str = "2025",
+    version: str | None = None,
+    account: str | None = None,
+    measure: str | None = None,
+) -> dict[str, Any]:
+    """Série mensal da métrica desagregada por filial (um dataset por filial)."""
+    catalog = resolve_metric_catalog(metric)
+    if catalog:
+        cube_name = cube_name or catalog.get("cube")
+        account = account or catalog.get("account")
+        version = version or catalog.get("version")
+        measure = measure or catalog.get("measure")
+        metric_name = catalog.get("name") or metric
+    else:
+        metric_name = metric or account or "métrica"
+
+    if not cube_name or not account:
+        raise TM1MCPError("Informe metric/account e cube_name para consulta por filial")
+
+    cache_payload = {
+        "connection_id": connection_id,
+        "cube_name": cube_name,
+        "metric": metric,
+        "year": year,
+        "version": version,
+        "account": account,
+        "measure": measure,
+        "group_by": "filial",
+    }
+    cached = get_cached("time_series_by_filial", cache_payload)
+    if cached:
+        return cached
+
+    summary = client.call_tool(
+        "cube_summary",
+        {"connection_id": connection_id, "cube_name": cube_name},
+    )
+    if not isinstance(summary, dict):
+        raise TM1MCPError(f"Não foi possível obter estrutura do cubo {cube_name}")
+
+    names = _dim_names(summary)
+    measure_dim = _find_measure_dim(names, cube_name)
+    ano_dim = _find_dim(names, "Ano", "Year")
+    mes_dim = _find_dim(names, "Mes", "Month")
+    versao_dim = _find_dim(names, "Versao", "Version", "Cenário", "Cenario")
+    conta_dim = _find_dim(names, "Conta", "Account", "Gerencial")
+    filial_dim = _find_dim(names, "Filial", "Empresa", "Entity", "Org")
+    produto_dim = _find_dim(names, "Produto", "Product")
+
+    if not all([measure_dim, ano_dim, mes_dim, conta_dim, filial_dim]):
+        raise TM1MCPError(f"Cubo {cube_name} não suporta consulta por filial. Dimensões: {names}")
+
+    branches = _list_filial_leaves(
+        client, connection_id, filial_dim, cube_name=cube_name, limit=12
+    )
+    if not branches:
+        raise TM1MCPError(
+            f"Nenhuma filial folha encontrada em {filial_dim}. "
+            f"list_elements retornou {len(_list_element_items(client, connection_id, filial_dim, top=100))} item(ns)."
+        )
+
+    measure_elem = measure or _first_measure_element(client, connection_id, measure_dim)
+    account_elem = _resolve_account_element(client, connection_id, conta_dim, account)
+    version_elem = version or "REAL"
+
+    where_parts = [
+        f"[{conta_dim}].[{account_elem}]",
+        f"[{ano_dim}].[{year}]",
+    ]
+    if versao_dim:
+        where_parts.append(f"[{versao_dim}].[{version_elem}]")
+    if produto_dim and catalog and catalog.get("produto"):
+        where_parts.append(f"[{produto_dim}].[{catalog['produto']}]")
+
+    month_set = ",".join(f"[{mes_dim}].[{m}]" for m in MONTH_LABELS)
+    branch_set = ",".join(f"[{filial_dim}].[{b}]" for b in branches)
+    mdx = (
+        f"SELECT {{[{measure_dim}].[{measure_elem}]}} ON 0, "
+        f"{{{month_set}}} ON 1, "
+        f"{{{branch_set}}} ON 2 "
+        f"FROM [{cube_name}] "
+        f"WHERE ({','.join(where_parts)})"
+    )
+
+    raw = client.call_tool(
+        "execute_mdx",
+        {"connection_id": connection_id, "mdx": mdx, "top": len(branches) * 12 + 5, "skip": 0},
+    )
+    if not isinstance(raw, dict):
+        raise TM1MCPError(f"Resposta MDX inválida: {raw}")
+
+    cells = raw.get("cells") or []
+    n_months = len(MONTH_LABELS)
+    series_groups: list[dict[str, Any]] = []
+    for branch_idx, branch_name in enumerate(branches):
+        series = []
+        for month_idx, month_code in enumerate(MONTH_LABELS):
+            ordinal = branch_idx * n_months + month_idx
+            cell = cells[ordinal] if ordinal < len(cells) else {}
+            value = cell.get("Value") if isinstance(cell, dict) else None
+            series.append(
+                {
+                    "label": MONTH_LABELS[month_code],
+                    "month": month_code,
+                    "value": value,
+                    "formatted": cell.get("FormattedValue") if isinstance(cell, dict) else None,
+                }
+            )
+        series_groups.append({"name": branch_name, "series": series})
+
+    summary_text = (
+        f"{metric_name} em {year} por filial: {len(branches)} filiais, "
+        f"série mensal Jan–Dez (versão {version_elem})."
+    )
+
+    result = {
+        "metric": metric_name,
+        "account": account_elem,
+        "cube": cube_name,
+        "period": year,
+        "version": version_elem,
+        "granularity": "monthly",
+        "group_by": "filial",
+        "branches": branches,
+        "series_groups": series_groups,
+        "summary": summary_text,
+        "mdx": mdx,
+        "sources": [{"tool": "query_time_series_by_filial", "mdx": mdx}],
+    }
+    set_cached("time_series_by_filial", cache_payload, result)
     return result
